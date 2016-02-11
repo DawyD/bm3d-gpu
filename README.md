@@ -21,26 +21,33 @@ For users that have convert or gm installed, it supports most of the image forma
 
 
 Usage:
+
 1. Download the code package and extract it. Go to that directory. 
 
 2. Compile the source code (on Unix/Linux).
 Run 
-make
+
+    make
 
 3. Run CUDA-accelerated BM3D image denoising application
-./bm3d
+
+    ./bm3d
 
 The generic way to run the code is:
-./bm3d noisyImage.bmp denoisedImage.bmp sigma [color [twostep [quiet]]]
+
+    ./bm3d noisyImage.bmp denoisedImage.bmp sigma [color [twostep [quiet]]]
 
 Options:
-color - color image denoising
-twostep - process both steps of the BM3D method
-quiet - no information about the state of processing is displayed
+- color - color image denoising
+- twostep - process both steps of the BM3D method
+- quiet - no information about the state of processing is displayed
 
 Example of gray-scale denoising by the fisrt step of BM3D:
-./bm3d lena_20.png lena_den.png 20
+
+    ./bm3d lena_20.png lena_den.png 20
 Example of color denoising by both steps of BM3D:
-./bm3d lena_20_color.png lena_den_color.png 20 color twostep
+
+    ./bm3d lena_20_color.png lena_den_color.png 20 color twostep
 Example of grayscale denoising by both steps of BM3D:
-./bm3d lena_25.png lena_den.png 25 nocolor twostep
+
+    ./bm3d lena_25.png lena_den.png 25 nocolor twostep
