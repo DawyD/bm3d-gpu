@@ -150,9 +150,8 @@ private:
 	std::vector<float*> d_denominator;	//Denminator used for aggregation
 	uint* d_num_patches_in_stack;		//Number of similar patches for each referenca patch of a batch that are stored in d_stacks
 	float* d_gathered_stacks;			//3D groups of a batch
-	float* d_transformed_stacks;		//3D groups of a batch
-	float* d_w_P;						//Weights for aggregation
 	float* d_gathered_stacks_basic; 	//Only for two step denoising, contains wiener coefficients
+	float* d_w_P;						//Weights for aggregation
 	float* d_kaiser_window;				//Kaiser window used for aggregation
 
 
@@ -180,7 +179,6 @@ private:
 
 		cuda_error_check( cudaMalloc((void**)&d_num_patches_in_stack, sizeof(uint) * h_batch_size.x * h_batch_size.y ) );
 
-		cuda_error_check( cudaMalloc((void**)&d_transformed_stacks, sizeof(float)*(maxN+1)*maxk*maxk*h_batch_size.x*h_batch_size.y) );
 		cuda_error_check( cudaMalloc((void**)&d_gathered_stacks, sizeof(float)*(maxN+1)*maxk*maxk*h_batch_size.x*h_batch_size.y) );
 		
 		cuda_error_check( cudaMalloc((void**)&d_w_P, sizeof(float) * h_batch_size.x*h_batch_size.y) );
@@ -395,7 +393,7 @@ private:
 					}
 					
 					//Apply the 2D DCT transform to each layer of 3D group
-					run_DCT2D8x8(d_transformed_stacks, d_gathered_stacks, trans_size, num_threads_tr, num_blocks_tr);
+					run_DCT2D8x8(d_gathered_stacks, d_gathered_stacks, trans_size, num_threads_tr, num_blocks_tr);
 					cuda_error_check( cudaGetLastError() );
 					cuda_error_check( cudaDeviceSynchronize() );
 
@@ -415,7 +413,7 @@ private:
 					*/
 					run_hard_treshold_block(
 						start_point,			//IN: First reference patch of a batch
-						d_transformed_stacks,	//IN/OUT: 3D groups with thransfomed patches
+						d_gathered_stacks,	//IN/OUT: 3D groups with thransfomed patches
 						d_w_P, 					//OUT: Weight of each 3D group
 						d_num_patches_in_stack,	//IN: Numbers of patches in 3D groups
 						stacks_dim,				//IN: Dimensions limiting addresses of reference patches
@@ -435,7 +433,7 @@ private:
 					}
 					
 					//Apply inverse 2D DCT transform to each layer of 3D group
-					run_IDCT2D8x8(d_gathered_stacks, d_transformed_stacks, trans_size, num_threads_tr, num_blocks_tr);
+					run_IDCT2D8x8(d_gathered_stacks, d_gathered_stacks, trans_size, num_threads_tr, num_blocks_tr);
 					cuda_error_check( cudaGetLastError() );
 					cuda_error_check( cudaDeviceSynchronize() );
 				
@@ -628,13 +626,12 @@ private:
 					}
 		
 					//Apply 2D DCT transform to each layer of 3D group that contains noisy patches
-					run_DCT2D8x8(d_transformed_stacks, d_gathered_stacks, trans_size, num_threads_tr, num_blocks_tr);
+					run_DCT2D8x8(d_gathered_stacks, d_gathered_stacks, trans_size, num_threads_tr, num_blocks_tr);
 					cuda_error_check( cudaGetLastError() );
 					cuda_error_check( cudaDeviceSynchronize() );
 					
 					//Apply 2D DCT transform to each layer of 3D group that contains patches from basic image estimate
-					float* d_transformed_stacks_basic = d_gathered_stacks; //reusing of buffer
-					run_DCT2D8x8(d_transformed_stacks_basic, d_gathered_stacks_basic, trans_size, num_threads_tr, num_blocks_tr);
+					run_DCT2D8x8(d_gathered_stacks_basic, d_gathered_stacks_basic, trans_size, num_threads_tr, num_blocks_tr);
 					cuda_error_check( cudaGetLastError() );
 					cuda_error_check( cudaDeviceSynchronize() );
 		
@@ -654,8 +651,8 @@ private:
 					*/
 					run_wiener_filtering(
 						start_point,				//IN: First reference patch of a batch
-						d_transformed_stacks,		//IN/OUT: 3D groups with thransfomed noisy patches that will be filtered
-						d_transformed_stacks_basic,	//IN/OUT: 3D groups with thransfomed basic patches estimates
+						d_gathered_stacks,			//IN/OUT: 3D groups with thransfomed noisy patches that will be filtered
+						d_gathered_stacks_basic,	//IN/OUT: 3D groups with thransfomed basic patches estimates
 						d_w_P,						//OUT: Weight of each 3D group
 						d_num_patches_in_stack,		//IN: Numbers of patches in 3D groups
 						stacks_dim,					//IN: Dimensions limiting addresses of reference patches
@@ -676,7 +673,7 @@ private:
 					}
 					
 					//Apply 2D IDCT transform to each layer of 3D group that contains filtered patches
-					run_IDCT2D8x8(d_gathered_stacks, d_transformed_stacks, trans_size, num_threads_tr, num_blocks_tr);
+					run_IDCT2D8x8(d_gathered_stacks, d_gathered_stacks, trans_size, num_threads_tr, num_blocks_tr);
 					
 					cuda_error_check( cudaGetLastError() );
 					cuda_error_check( cudaDeviceSynchronize() );
@@ -762,7 +759,6 @@ private:
 		cuda_error_check( cudaFree(d_stacks) );
 		cuda_error_check( cudaFree(d_num_patches_in_stack) );
 
-		cuda_error_check( cudaFree(d_transformed_stacks));
 		cuda_error_check( cudaFree(d_gathered_stacks));
 		cuda_error_check( cudaFree(d_w_P));
 
@@ -807,8 +803,7 @@ public:
 	BM3D() : 
 		h_hard_params(),
 		h_wien_params(),
-		d_gathered_stacks(0),
-		d_transformed_stacks(0), d_w_P(0), d_gathered_stacks_basic(0), d_stacks(0), d_num_patches_in_stack(0),
+		d_gathered_stacks(0), d_gathered_stacks_basic(0), d_w_P(0), d_stacks(0), d_num_patches_in_stack(0),
 		h_reserved_width(0), h_reserved_height(0), h_reserved_channels(0), h_reserved_two_step(0), d_kaiser_window(0)
 	{
 		int device;
@@ -820,8 +815,7 @@ public:
 	BM3D(uint n, uint k, uint N, uint T, uint p, float sigma, float L3D, bool seceon_step) : 
 		h_hard_params(n, k, N, T, p, sigma, L3D),
 		h_wien_params(n, k, N, T, p, sigma, L3D),
-		d_gathered_stacks(0),
-		d_transformed_stacks(0), d_w_P(0), d_gathered_stacks_basic(0), d_stacks(0), d_num_patches_in_stack(0),
+		d_gathered_stacks(0), d_gathered_stacks_basic(0), d_w_P(0), d_stacks(0), d_num_patches_in_stack(0),
 		h_reserved_width(0), h_reserved_height(0), h_reserved_channels(0), h_reserved_two_step(0), d_kaiser_window(0)
 	{
 		int device;
