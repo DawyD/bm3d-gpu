@@ -264,7 +264,7 @@ private:
 		uint & s_mem_size)		//OUT: shared memory size
 	{
 		//Determine number of warps form block-matching according to the size of shared memory. 
-		const uint p_block_width = (properties.warpSize+params.k-1)*params.p;
+		const uint p_block_width = (properties.warpSize * params.p) + params.k - 1;
 		const uint s_image_p_size = p_block_width * params.k * sizeof(uchar);
 
 		const float shared_mem_usage = 1.0f; // 0 - 1

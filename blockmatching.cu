@@ -94,7 +94,7 @@ void block_matching(
 	int num_warps = blockDim.x/warpSize;
 	
 	//p_block denotes reference rectangle on which current cuda block is computing
-	uint p_rectangle_width = (warpSize+params.k-1)*params.p; //16 wasteful operations
+	uint p_rectangle_width = (warpSize * params.p) + params.k-1; //16 wasteful operations
 	uint p_rectangle_start = start_point.x + blockIdx.x * warpSize * params.p;
 
 	//Shared arrays
