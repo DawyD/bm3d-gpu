@@ -112,7 +112,7 @@ extern "C" void run_aggregate_final(
 extern "C" void run_wiener_filtering(
 	const uint2 start_point,
 	float* patch_stack,
-	float* patch_stack_basic,
+	const float* __restrict patch_stack_basic,
 	float*  w_P,
 	const uint* __restrict num_patches_in_stack,
 	uint2 stacks_dim,
@@ -168,6 +168,8 @@ private:
 
 	//Device properties
 	cudaDeviceProp properties;
+
+	bool _verbose;
 	
 	//Allocate device buffers dependent on denoising parameters
 	void allocate_device_auxiliary_arrays()
@@ -269,11 +271,13 @@ private:
 		const uint shared_mem_avaliable = (uint)(properties.sharedMemPerBlock * shared_mem_usage) - s_image_p_size;
 
 		//Block-matching shared memory sizes per warp
-		const uint s_diff_size = p_block_width * sizeof(uint);
+		const uint s_diff_size = p_block_width * sizeof(float);
 		const uint s_patches_in_stack_size = properties.warpSize * sizeof(uint);
 		const uint s_patch_stacks_size = params.N * properties.warpSize * sizeof(uint2float1);
 
 		const uint num_warps = std::min(shared_mem_avaliable / (s_diff_size + s_patches_in_stack_size + s_patch_stacks_size),32u);
+		if (_verbose)
+			std::cout << "Number of warps: " << num_warps << std::endl;
 
 		//Block-matching Launch parameters
 		s_mem_size = ((s_diff_size + s_patches_in_stack_size + s_patch_stacks_size) * num_warps) + s_image_p_size;		
@@ -283,9 +287,8 @@ private:
 
 	/*
 	Launch first step of BM3D. It produces basic estimate in denoised_image arrays.
-	Set verbose to false for quiet mode (no text on standart output)
 	*/
-	void first_step(std::vector<uchar*> & denoised_image, int width, int height, int channels, bool verbose = true)
+	void first_step(std::vector<uchar*> & denoised_image, int width, int height, int channels)
 	{	
 		//image dimensions
 		const uint2 image_dim = make_uint2(width,height);
@@ -334,14 +337,14 @@ private:
 		for(start_point.y = 0; start_point.y < stacks_dim.y + h_hard_params.p - 1; start_point.y+=(h_batch_size.y*h_hard_params.p))
 		{
 			//Show progress
-			if (verbose)
+			if (_verbose)
 			{
 				int percent = (int)(((float)start_point.y / (float)stacks_dim.y) * (float)100);
 				std::cout << "\rProcessing " << percent << "%" << std::flush;
 			}
 			for(start_point.x = 0; start_point.x < stacks_dim.x + h_hard_params.p - 1; start_point.x+=(h_batch_size.x*h_hard_params.p))
 			{
-				if (verbose)
+				if (_verbose)
 					time_blockmatching.start();
 				
 				//Finds similar patches for each reference patch of a batch and stores them in d_stacks array
@@ -361,12 +364,12 @@ private:
 				cuda_error_check( cudaGetLastError() );
 				cuda_error_check( cudaDeviceSynchronize() );
 
-				if (verbose)
+				if (_verbose)
 					time_blockmatching.stop();
 
 				for (int channel = 0; channel < channels; ++channel)
 				{
-					if (verbose)
+					if (_verbose)
 						time_get.start();
 
 					//Assembles 3D groups of a batch according to the d_stacks array
@@ -385,8 +388,8 @@ private:
 			
 					cuda_error_check( cudaGetLastError() );
 					cuda_error_check( cudaDeviceSynchronize() );
-
-					if (verbose)
+					
+					if (_verbose)
 					{
 						time_get.stop();
 						time_transform.start();
@@ -398,19 +401,20 @@ private:
 					cuda_error_check( cudaDeviceSynchronize() );
 
 
-					if (verbose)
+					if (_verbose)
 					{
 						time_transform.stop();
 						time_treshold.start();
 					}
 
-				
+					
 					/*
 					1) 1D Walsh-Hadamard transform of proper size on the 3rd dimension of each 3D group of a batch to complete the 3D transform.
 					2) Hard thresholding
 					3) Inverse 1D Walsh-Hadamard trannsform.
 					4) Compute the weingt of each 3D group
 					*/
+					
 					run_hard_treshold_block(
 						start_point,			//IN: First reference patch of a batch
 						d_gathered_stacks,	//IN/OUT: 3D groups with thransfomed patches
@@ -426,7 +430,7 @@ private:
 					cuda_error_check( cudaGetLastError() );
 					cuda_error_check( cudaDeviceSynchronize() );
 					
-					if (verbose)
+					if (_verbose)
 					{
 						time_treshold.stop();
 						time_itransform.start();
@@ -434,10 +438,11 @@ private:
 					
 					//Apply inverse 2D DCT transform to each layer of 3D group
 					run_IDCT2D8x8(d_gathered_stacks, d_gathered_stacks, trans_size, num_threads_tr, num_blocks_tr);
+					
 					cuda_error_check( cudaGetLastError() );
 					cuda_error_check( cudaDeviceSynchronize() );
-				
-					if (verbose)
+					
+					if (_verbose)
 					{
 						time_itransform.stop();
 						time_aggregate.start();
@@ -463,7 +468,7 @@ private:
 					cuda_error_check( cudaDeviceSynchronize() );
 			
 			
-					if (verbose)
+					if (_verbose)
 						time_aggregate.stop();
 				}
 			}	
@@ -484,7 +489,7 @@ private:
 			cuda_error_check( cudaDeviceSynchronize() );
 		}
 
-		if(verbose)
+		if(_verbose)
 		{
 			//Print timers
 			std::cout << "\rFirst step details:" << std::endl; //DEBUG: erase line
@@ -498,7 +503,7 @@ private:
 
 	}
 
-	void second_step(std::vector<uchar*> & denoised_image, int width, int height, int channels, bool verbose = true)
+	void second_step(std::vector<uchar*> & denoised_image, int width, int height, int channels)
 	{	
 		//Image dimensions
 		const uint2 image_dim = make_uint2(width,height);
@@ -550,14 +555,14 @@ private:
 		for(start_point.y = 0; start_point.y < stacks_dim.y + h_wien_params.p - 1; start_point.y+=(h_batch_size.y*h_wien_params.p))
 		{
 			//Show progress
-			if (verbose)
+			if (_verbose)
 			{
 				int percent = (int)(((float)start_point.y / (float)stacks_dim.y) * (float)100);
 				std::cout << "\rProcessing " << percent << "%" << std::flush;
 			}
 			for(start_point.x = 0; start_point.x < stacks_dim.x + h_wien_params.p - 1; start_point.x+=(h_batch_size.x*h_wien_params.p))
 			{
-				if (verbose)
+				if (_verbose)
 					time_blockmatching.start();
 
 				run_block_matching(
@@ -576,12 +581,12 @@ private:
 				cuda_error_check( cudaDeviceSynchronize() );
 
 
-				if (verbose)
+				if (_verbose)
 					time_blockmatching.stop();
 
 				for (int channel = 0; channel < channels; ++channel)
 				{
-					if (verbose)
+					if (_verbose)
 						time_get.start();
 				
 					//Get patches from basic image estimate to 3D auxiliary array according to the addresess form block-matching
@@ -619,7 +624,7 @@ private:
 					cuda_error_check( cudaDeviceSynchronize() );
 
 				
-					if (verbose)
+					if (_verbose)
 					{
 						time_get.stop();
 						time_transform.start();
@@ -636,7 +641,7 @@ private:
 					cuda_error_check( cudaDeviceSynchronize() );
 		
 					
-					if (verbose)
+					if (_verbose)
 					{
 						time_transform.stop();
 						time_wien.start();
@@ -652,7 +657,7 @@ private:
 					run_wiener_filtering(
 						start_point,				//IN: First reference patch of a batch
 						d_gathered_stacks,			//IN/OUT: 3D groups with thransfomed noisy patches that will be filtered
-						d_gathered_stacks_basic,	//IN/OUT: 3D groups with thransfomed basic patches estimates
+						d_gathered_stacks_basic,	//IN: 3D groups with thransfomed basic patches estimates
 						d_w_P,						//OUT: Weight of each 3D group
 						d_num_patches_in_stack,		//IN: Numbers of patches in 3D groups
 						stacks_dim,					//IN: Dimensions limiting addresses of reference patches
@@ -666,7 +671,7 @@ private:
 					cuda_error_check( cudaDeviceSynchronize() );
 
 				
-					if (verbose)
+					if (_verbose)
 					{
 						time_wien.stop();
 						time_itransform.start();
@@ -679,7 +684,7 @@ private:
 					cuda_error_check( cudaDeviceSynchronize() );
 					
 				
-					if (verbose)
+					if (_verbose)
 					{
 						time_itransform.stop();
 						time_aggregate.start();
@@ -706,7 +711,7 @@ private:
 					cuda_error_check( cudaDeviceSynchronize() );
 				
 				
-					if (verbose)
+					if (_verbose)
 						time_aggregate.stop();
 				}	
 			}
@@ -726,7 +731,7 @@ private:
 			cuda_error_check( cudaDeviceSynchronize() );
 		}
 
-		if(verbose)
+		if(_verbose)
 		{
 			//Print timers
 			std::cout << "\rSecond step details:" << std::endl;
@@ -804,7 +809,7 @@ public:
 		h_hard_params(),
 		h_wien_params(),
 		d_gathered_stacks(0), d_gathered_stacks_basic(0), d_w_P(0), d_stacks(0), d_num_patches_in_stack(0),
-		h_reserved_width(0), h_reserved_height(0), h_reserved_channels(0), h_reserved_two_step(0), d_kaiser_window(0)
+		h_reserved_width(0), h_reserved_height(0), h_reserved_channels(0), h_reserved_two_step(0), d_kaiser_window(0), _verbose(false)
 	{
 		int device;
 		cuda_error_check( cudaGetDevice(&device) );
@@ -816,7 +821,7 @@ public:
 		h_hard_params(n, k, N, T, p, sigma, L3D),
 		h_wien_params(n, k, N, T, p, sigma, L3D),
 		d_gathered_stacks(0), d_gathered_stacks_basic(0), d_w_P(0), d_stacks(0), d_num_patches_in_stack(0),
-		h_reserved_width(0), h_reserved_height(0), h_reserved_channels(0), h_reserved_two_step(0), d_kaiser_window(0)
+		h_reserved_width(0), h_reserved_height(0), h_reserved_channels(0), h_reserved_two_step(0), d_kaiser_window(0), _verbose(false)
 	{
 		int device;
 		cuda_error_check( cudaGetDevice(&device) );
@@ -840,7 +845,7 @@ public:
 	src_image and dst_image are arrays allocated in the host memory and the pixels are stored here by the channels. 
 	First width*height pixels represent luma (Y) component and each following width*height pixels represent color components
 	*/
-	void denoise_host_image(uchar *src_image, uchar *dst_image, int width, int height, int channels, bool two_step, bool verbose = true)
+	void denoise_host_image(uchar *src_image, uchar *dst_image, int width, int height, int channels, bool two_step)
 	{
 		Stopwatch total;
 		total.start();
@@ -860,25 +865,28 @@ public:
 
 		//1st denoising step
 		null_aggregation_buffers(width,height);
-		first_step(d_denoised_image, width, height, channels, verbose);
+		first_step(d_denoised_image, width, height, channels);
 
 		p1.stop();
-		std::cout << "1st step took: " << p1.getSeconds() << std::endl;
-		Stopwatch p2;
-		p2.start();
+		if (_verbose)
+			std::cout << "1st step took: " << p1.getSeconds() << std::endl;
 		
 		//2nd denoising step
 		if (two_step)
 		{
+			Stopwatch p2;
+			p2.start();
 			null_aggregation_buffers(width,height);
-			second_step(d_denoised_image, width, height, channels, verbose);
+			second_step(d_denoised_image, width, height, channels);
+			if (_verbose)
+				std::cout << "2nd step took: " << p2.getSeconds() << std::endl;
 		}
 
 		//Copy back
 		copy_host_image(dst_image, width, height, channels);
 
-		std::cout << "2nd step took: " << p2.getSeconds() << std::endl;
-		std::cout << "Total time: " << total.getSeconds() << std::endl;
+		if(_verbose)
+			std::cout << "Total time: " << total.getSeconds() << std::endl;
 	}
 
 	/*void denoise_device_image(uchar *src_image, uchar *dst_image, int width, int height, int channels, bool two_step)
@@ -914,6 +922,11 @@ public:
 			throw std::invalid_argument("k has to be 8, other values not implemented yet.");
 	}
 
+	void set_verbose(bool verbose)
+	{
+		_verbose = verbose;
+	}
+
 	void reserve(int width, int height, int channels, bool two_step)
 	{
 		h_reserved_width = width;
@@ -922,10 +935,10 @@ public:
 		h_reserved_two_step = two_step;
 
 		free_device_image();
-		free_device_auxiliary_arrays();
+		free_device_auxiliary_arrays(); //TODO: not necessary
 
 		allocate_device_image(width,height,channels);
-		allocate_device_auxiliary_arrays();
+		allocate_device_auxiliary_arrays(); //TODO: not necessary
 	}
 	void clear()
 	{

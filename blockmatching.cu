@@ -6,8 +6,6 @@
 #include <device_launch_parameters.h>
 #include <vector_types.h>
 
-#include<stdio.h>
-
 
 // Nearest lower power of 2
 __device__ __inline__ uint flp2 (uint x)
