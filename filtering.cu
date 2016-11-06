@@ -4,6 +4,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+#include <stdio.h>
 
 #include<float.h>
 
@@ -47,20 +48,18 @@ float abspow2(float & a)
 	return a * a;
 }
 
-/**
-* Integer logarithm base 2.
-*/
+
+//Integer logarithm base 2.
 template <typename IntType>
-__device__ inline uint ilog2(IntType n)
+__device__ __inline__ uint ilog2(IntType n)
 {
 	uint l;
 	for (l = 0; n; n >>= 1, ++l);
 	return l;
 }
 
-/**
-* Orthogonal transformation.
-*/
+
+//Orthogonal transformation.
 template <typename T>
 __device__ __inline__ void rotate(T& a, T& b)
 {
@@ -70,9 +69,8 @@ __device__ __inline__ void rotate(T& a, T& b)
 	b = tmp - b;
 }
 
-/**
-* Fast Walsh-Hadamard transform.
-*/
+
+//Fast Walsh-Hadamard transform.
 template <typename T>
 __device__ __inline__ void fwht(T *data, uint n)
 {
@@ -84,7 +82,6 @@ __device__ __inline__ void fwht(T *data, uint n)
 			rotate(data[j + k], data[j + k + (uint)(1 << i)]);
 	}
 }
-
 
 //Based on blockIdx it computes the addresses to the arrays in global memory
 __device__ inline void get_block_addresses(
@@ -137,11 +134,12 @@ void get_block(
 	
 	const uint2* z_ptr = &stacks[ idx3(0, blockIdx.x, blockIdx.y, params.N,  gridDim.x) ];
 
-	uint num_patches = g_num_patches_in_stack[ idx2(blockIdx.x, blockIdx.y, gridDim.x) ]+1;
+	uint num_patches = g_num_patches_in_stack[ idx2(blockIdx.x, blockIdx.y, gridDim.x) ];
+	
+	patch_stack[ idx3(threadIdx.x, threadIdx.y, 0, params.k, params.k) ] = (float)(image[ idx2(outer_address.x+threadIdx.x, outer_address.y+threadIdx.y, image_dim.x)]);
 	for(uint i = 0; i < num_patches; ++i)
 	{
-		uint2 val = (i == 0) ? outer_address : z_ptr[i-1];
-		patch_stack[ idx3(threadIdx.x, threadIdx.y, i, params.k, params.k) ] = (float)(image[ idx2(val.x+threadIdx.x, val.y+threadIdx.y, image_dim.x)]);
+		patch_stack[ idx3(threadIdx.x, threadIdx.y, i+1, params.k, params.k) ] = (float)(image[ idx2(z_ptr[i].x+threadIdx.x, z_ptr[i].y+threadIdx.y, image_dim.x)]);
 	}
 }
 
@@ -176,14 +174,13 @@ void hard_treshold_block(
 	if (outer_address.x >= stacks_dim.x || outer_address.y >= stacks_dim.y) return;
 
 	uint num_patches = g_num_patches_in_stack[ idx2(blockIdx.x, blockIdx.y, gridDim.x) ]+1; //+1 for the reference patch.
-	
-	float* s_patch_stack = data + (tid * (num_patches+1)); //+1 for avoiding bank conflicts
+	float* s_patch_stack = data + (tid * (num_patches+1)); //+1 for avoiding bank conflicts //TODO:sometimes
 	patch_stack = patch_stack + startidx + tid;
 		
 	//Load to the shared memory
 	for(uint i = 0; i < num_patches; ++i)
-		s_patch_stack[i] = patch_stack[ i*tcount ];
-	
+		s_patch_stack[i] = patch_stack[ i*tcount ];	
+
 	//1D Transform
 	fwht(s_patch_stack, num_patches);
 	
@@ -210,10 +207,10 @@ void hard_treshold_block(
 	}
 	
 	//Reuse the shared memory for 32 partial sums
-	uint* shared = (uint*)data; 
-	
+	__syncthreads();
+	uint* shared = (uint*)data;
 	//Sum the number of non-zero coefficients for a 3D group
-	nonzero = blockReduceSum<uint>(shared, nonzero, tid, tcount); 
+	nonzero = blockReduceSum<uint>(shared, nonzero, tid, tcount);
 	
 	//Save the weight of a 3D group (1/nonzero coefficients)
 	if (tid == 0)
@@ -296,8 +293,8 @@ Calculate the wiener coefficients
 __global__
 void wiener_filtering(
 	const uint2 start_point,						//IN: first reference patch of a batch
-	float* patch_stack,								//IN: 3D groups with thransfomed patches
-	float* patch_stack_basic,						//IN/OUT: 
+	float* patch_stack,								//IN/OUT: 3D groups with thransfomed nosiy patches
+	const float* __restrict patch_stack_basic,		//IN: 3D groups with thransfomed patches of the basic estimate
 	float* w_P,										//OUT: Weigths of 3D groups
 	const uint* __restrict g_num_patches_in_stack,	//IN: numbers of patches in 3D groups
 	uint2 stacks_dim,								//IN: dimensions limiting addresses of reference patches
@@ -357,6 +354,7 @@ void wiener_filtering(
 		patch_stack[ i*tcount ] = s_patch_stack[i];
 	}
 	
+	__syncthreads();
 	//reuse of the shared memory for 32 partial sums
 	float* shared = (float*)data;
 
@@ -468,7 +466,7 @@ extern "C" void run_aggregate_final(
 extern "C" void run_wiener_filtering(
 	const uint2 start_point,
 	float* patch_stack,
-	float* patch_stack_basic,
+	const float* __restrict patch_stack_basic,
 	float*  w_P,
 	const uint* __restrict num_patches_in_stack,
 	uint2 stacks_dim,
