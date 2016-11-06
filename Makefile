@@ -2,10 +2,10 @@ CPP=g++
 CFLAGS= -O2 --std=c++11
 LDFLAGS=
 LIBS=cufft cudart
-LIBDIRS=/usr/local/cuda-7.0/lib64
+LIBDIRS=/usr/local/cuda-7.5/lib64
 HEADERS=$(shell find . -name '*.hpp')
 CUHEADERS=$(shell find . -name '*.cuh')
-INCLUDE=/usr/local/cuda-7.0/include
+INCLUDE=/usr/local/cuda-7.5/include
 TARGET=bm3d
 
 all: $(TARGET)
