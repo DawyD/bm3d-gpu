@@ -35,12 +35,13 @@ Run
 
 The generic way to run the code is:
 
-    ./bm3d noisyImage.bmp denoisedImage.bmp sigma [color [twostep [quiet]]]
+    ./bm3d NoisyImage.png DenoisedImage.png sigma [color [twostep [quiet [ReferenceImage]]]]
 
 Options:
-- color - color image denoising
+- color - color image denoising (experimental only)
 - twostep - process both steps of the BM3D method
 - quiet - no information about the state of processing is displayed
+- ReferenceImage - if provided, computes and prints PSNR between the ReferenceImage and DenoisedImage
 
 Example of gray-scale denoising by the fisrt step of BM3D:
 
@@ -48,6 +49,7 @@ Example of gray-scale denoising by the fisrt step of BM3D:
 Example of color denoising by both steps of BM3D:
 
     ./bm3d lena_20_color.png lena_den_color.png 20 color twostep
-Example of grayscale denoising by both steps of BM3D:
 
-    ./bm3d lena_25.png lena_den.png 25 nocolor twostep
+Example of grayscale denoising by both steps of BM3D with PSNR computation:
+
+    ./bm3d lena_25.png lena_den.png 25 nocolor twostep quiet lena.png

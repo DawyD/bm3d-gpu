@@ -11,22 +11,19 @@ int main(int argc, char** argv)
 {
 	if( argc < 4 )
 	{
-		std::cerr << "Usage: " << argv[0] << " NosiyImage DenoisedImage sigma [color [twostep [quiet]]]" << std::endl;
+		std::cerr << "Usage: " << argv[0] << " NosiyImage DenoisedImage sigma [color [twostep [quiet [ReferenceImage]]]]" << std::endl;
 		return 1;
 	}
 	float sigma = strtof(argv[3],NULL);
-	std::cout << "Sigma = " << sigma << std::endl;
 
 	unsigned int channels = 1;
 	if (argc >= 5 && strcmp(argv[4],"color") == 0)
 	{
-		std::cout << "Color image!" << std::endl;
 		channels = 3;
 	}
 	bool twostep = false;
 	if (argc >= 6 && strcmp(argv[5],"twostep") == 0)
 	{
-		std::cout << "Two step!" << std::endl;
 		twostep = true;
 	}
 	bool verbose = true;
@@ -35,6 +32,19 @@ int main(int argc, char** argv)
 		verbose = false;
 	}
 
+	if (verbose)
+	{
+		std::cout << "Sigma = " << sigma << std::endl;
+		if (twostep)
+			std::cout << "#Steps: 2" << std::endl;
+		else
+			std::cout << "#Steps: 1" << std::endl;
+
+		if (channels > 1)
+			std::cout << "Color denoising: yes" << std::endl;
+		else
+			std::cout << "Color denoising: no" << std::endl;
+	}
 	
 	//Allocate images
 	CImg<unsigned char> image(argv[1]);
@@ -51,7 +61,8 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	std::cout << "width: " << image.width() << " height: " << image.height() << std::endl;
+	if(verbose)
+		std::cout << "width: " << image.width() << " height: " << image.height() << std::endl;
 
 	//Launch BM3D
 	try {
@@ -59,13 +70,13 @@ int main(int argc, char** argv)
 		//		    (n, k,N, T,   p,sigma, L3D)
 		bm3d.set_hard_params(19,8,16,2500,3,sigma, 2.7f);
 		bm3d.set_wien_params(19,8,32,400, 3,sigma);
+		bm3d.set_verbose(verbose);
 		bm3d.denoise_host_image(image.data(),
 				 image2.data(),
 				 image.width(),
 				 image.height(),
 				 channels,
-				 twostep,
-				 verbose);
+				 twostep);
 	}
 	catch(std::exception & e)  {
 		std::cerr << "There was an error while processing image: " << std::endl << e.what() << std::endl;
@@ -79,6 +90,12 @@ int main(int argc, char** argv)
 		image2 = image2.get_channel(0);
 	//Save denoised image
 	image2.save( argv[2] );
+
+	if (argc >= 8)
+	{
+		CImg<unsigned char> reference_image(argv[7]);
+		std::cout << "PSNR:" << reference_image.PSNR(image2) << std::endl;
+	}
 
     return 0;
 }
