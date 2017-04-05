@@ -23,13 +23,13 @@ __device__ __inline__ T L2p2(const T i1, const T i2)
 
 /*
 Adds new patch to patch stack (only N most similar are kept)
-Note: Stack is just array, not FIFO
+Note: Stack is just an array, not FIFO
 */
 __device__
 void add_to_matched_image(
 	uint *stack, 				//IN/OUT: Stack of N patches matched to current reference patch
 	uchar *num_patches_in_stack,//IN/OUT: Number of patches in stack
-	const uint value, 			//IN: [ diff(ushort) | x,y: displacement (ushort) ]
+	const uint value, 			//IN: [..DIFF(ushort)..|..LOC_Y(sbyte)..|..LOC_X(sbyte)..]
 	const Params & params		//IN: Denoising parameters
 	)
 {
@@ -74,7 +74,7 @@ Each thread process one reference patch. All the warps of a block process the sa
 __global__
 void block_matching(
 	const  uchar* __restrict image, //IN: Original image
-	ushort* g_stacks, 				//OUT: For each reference patch contains addresses of similar patches (patch is adressed by top left corner)
+	ushort* g_stacks, 				//OUT: For each reference patch contains addresses of similar patches (patch is adressed by top left corner) [..LOC_Y(sbyte)..|..LOC_X(sbyte)..]
 	uint* g_num_patches_in_stack,	//OUT: For each reference patch contains number of similar patches
 	const uint2 image_dim,			//IN: Image dimensions
 	const uint2 stacks_dim,			//IN: Size of area, where reference patches could be located
@@ -150,7 +150,8 @@ void block_matching(
 
 		for(int x = from.x; x <= (int)params.n; x += num_warps)
 		{
-			if (x == 0 && y == 0) continue; //Reference patch is always the most similar to itself (there is no need to copute it)
+			//Reference patch is always the most similar to itself (there is no need to copute it)
+			if (x == 0 && y == 0) continue; 
 
 			//Each warp is computing the same patch with slightly different displacement.
 			//Compute distance of reference patch p from current patch q which is dispaced by (x+tid,y)
@@ -160,7 +161,6 @@ void block_matching(
 			q.x = q_rectangle_start + inner_p_x;
 
 			//Compute distance for each column of reference patch
-			//DEV: performance impact: cca 64% 
 			for(uint i = tid; i < p_rectangle_width && p_rectangle_start+i < image_dim.x && q_rectangle_start+i < image_dim.x; i+=warpSize)
 			{
 				uint dist = 0;
@@ -174,12 +174,10 @@ void block_matching(
 			if (p.x >= stacks_dim.x || q.x >= stacks_dim.x) continue;
 			
 			//Sum column distances to obtain patch distance
-			//DEV performance impact: cca 14%
 			uint diff = 0;
 			for (uint i = 0; i < params.k; ++i) 
 				diff += s_diff[inner_p_x + i];
 			
-			//DEV performance impact: cca 39%
 			//Distance threshold
 			if(diff < params.Tn)
 			{
@@ -249,7 +247,7 @@ void block_matching(
 
 extern "C" void run_block_matching(
 	const  uchar* __restrict image, //Original image
-	ushort* stacks, 					//For each reference patch contains addresses of similar patches (patch is adressed by top left corner)
+	ushort* stacks, 				//For each reference patch contains addresses of similar patches (patch is adressed by top left corner)
 	uint* num_patches_in_stack,		//For each reference patch contains number of similar patches
 	const uint2 image_dim,			//Image dimensions
 	const uint2 stacks_dim,			//size of area where reference patches could be located
