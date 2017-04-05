@@ -10,12 +10,7 @@
 // Nearest lower power of 2
 __device__ __inline__ uint flp2 (uint x)
 {
-    x = x | (x >> 1);
-    x = x | (x >> 2);
-    x = x | (x >> 4);
-    x = x | (x >> 8);
-    x = x | (x >> 16);
-    return x - (x >> 1);
+	return (0x80000000u >> __clz(x));
 }
 
 //Computes the squared difference between two numbers
@@ -32,20 +27,20 @@ Note: Stack is just array, not FIFO
 */
 __device__
 void add_to_matched_image(
-	uint2float1 *stack, 		//IN/OUT: Stack of N patches matched to current reference patch
-	uint *num_patches_in_stack,	//IN/OUT: Number of patches in stack
-	const uint2float1 value, 	//IN: x,y: displacement, val: computed difference
+	uint *stack, 				//IN/OUT: Stack of N patches matched to current reference patch
+	uchar *num_patches_in_stack,//IN/OUT: Number of patches in stack
+	const uint value, 			//IN: [ diff(ushort) | x,y: displacement (ushort) ]
 	const Params & params		//IN: Denoising parameters
 	)
 {
 	//stack[*num_patches_in_stack-1] is most similar (lowest number)
 	int k;
 
-	uint num = (*num_patches_in_stack);
+	uchar num = (*num_patches_in_stack);
 	if (num < params.N) //add new value
 	{
 		k = num++;
-		while(k > 0 && value.val > stack[k-1].val)
+		while(k > 0 && value > stack[k-1])
 		{
 			stack[k] = stack[k-1];
 			--k;
@@ -54,12 +49,12 @@ void add_to_matched_image(
 		stack[k] = value;
 		*num_patches_in_stack = num;
 	}
-	else if (value.val >= stack[0].val) 
+	else if (value >= stack[0]) 
 		return;	
 	else //delete highest value and add new
 	{
 		k = 1;
-		while (k < params.N && value.val < stack[k].val)
+		while (k < params.N && value < stack[k])
 		{
 			stack[k-1] = stack[k];
 			k++;
@@ -79,7 +74,7 @@ Each thread process one reference patch. All the warps of a block process the sa
 __global__
 void block_matching(
 	const  uchar* __restrict image, //IN: Original image
-	uint2* g_stacks, 				//OUT: For each reference patch contains addresses of similar patches (patch is adressed by top left corner)
+	ushort* g_stacks, 				//OUT: For each reference patch contains addresses of similar patches (patch is adressed by top left corner)
 	uint* g_num_patches_in_stack,	//OUT: For each reference patch contains number of similar patches
 	const uint2 image_dim,			//IN: Image dimensions
 	const uint2 stacks_dim,			//IN: Size of area, where reference patches could be located
@@ -92,15 +87,15 @@ void block_matching(
 	int num_warps = blockDim.x/warpSize;
 	
 	//p_block denotes reference rectangle on which current cuda block is computing
-	uint p_rectangle_width = (warpSize * params.p) + params.k-1; //16 wasteful operations
+	uint p_rectangle_width = ((warpSize-1) * params.p) + params.k;
 	uint p_rectangle_start = start_point.x + blockIdx.x * warpSize * params.p;
 
 	//Shared arrays
 	extern __shared__ uint s_data[];
-	float *s_diff = (float*)s_data; //SIZE: p_rectangle_width*num_warps
-	uint *s_patches_in_stack = &s_data[p_rectangle_width*num_warps]; //SIZE: num_warps*warpSize
-	uint2float1 *s_stacks = (uint2float1*)&s_data[num_warps*(p_rectangle_width+warpSize)]; //SIZE: params.N*num_warps*warpSize*3 (sizeof(uint2float1))
-	uchar *s_image_p = (uchar*)&s_data[(p_rectangle_width+warpSize + params.N*3*warpSize)*num_warps]; //SIZE: p_rectangle_width*params.k
+	uint *s_diff = (uint*)&s_data; //SIZE: p_rectangle_width*num_warps
+	uint *s_stacks = (uint*)&s_data[p_rectangle_width*num_warps]; //SIZE: params.N*num_warps*warpSize
+	uchar *s_patches_in_stack = (uchar*)&s_data[num_warps*(p_rectangle_width + params.N*warpSize)]; //SIZE: num_warps*warpSize
+	uchar *s_image_p = (uchar*)&s_patches_in_stack[num_warps*warpSize]; //SIZE: p_rectangle_width*params.k
 
 	s_diff += idx2(0, wid, p_rectangle_width);
 
@@ -134,8 +129,11 @@ void block_matching(
 		if (p_rectangle_start+sx >= image_dim.x) continue;
 		s_image_p[i] = image[idx2(p_rectangle_start+sx,p.y+sy,image_dim.x)];
 	}
-
+	
 	__syncthreads();
+	
+	//scale difference so that it can fit ushort
+	uint shift = (__clz(params.Tn) < 16u) ? 16u - (uint)__clz(params.Tn) : 0;
 	
 
 	//Ensure that displaced patch coordinates (q) will be positive
@@ -165,10 +163,10 @@ void block_matching(
 			//DEV: performance impact: cca 64% 
 			for(uint i = tid; i < p_rectangle_width && p_rectangle_start+i < image_dim.x && q_rectangle_start+i < image_dim.x; i+=warpSize)
 			{
-				float dist = 0;
+				uint dist = 0;
 				for(uint iy = 0; iy < params.k; ++iy)
 				{
-					dist += L2p2(((float)s_image_p[ idx2(i, iy, p_rectangle_width) ]), ((float)image[ idx2(q_rectangle_start+i, q.y+iy, image_dim.x) ]));
+					dist += L2p2((int)s_image_p[ idx2(i, iy, p_rectangle_width) ], (int)image[ idx2(q_rectangle_start+i, q.y+iy, image_dim.x) ]);
 				}
 				s_diff[i] = dist;
 			}
@@ -177,7 +175,7 @@ void block_matching(
 			
 			//Sum column distances to obtain patch distance
 			//DEV performance impact: cca 14%
-			float diff = 0.0f;
+			uint diff = 0;
 			for (uint i = 0; i < params.k; ++i) 
 				diff += s_diff[inner_p_x + i];
 			
@@ -185,11 +183,18 @@ void block_matching(
 			//Distance threshold
 			if(diff < params.Tn)
 			{
+				uint loc_y = (uint)((q.y - p.y) & 0xFF); //relative location y (-127 to 127)
+				uint loc_x = (uint)((q.x - p.x) & 0xFF); //relative location x (-127 to 127)
+				diff >>= shift;
+				diff <<= 16u; // [..DIFF(ushort)..|..LOC_Y(sbyte)..|..LOC_X(sbyte)..]
+				diff |= (loc_y << 8u);
+				diff |= loc_x;
+				
 				//Add current patch to s_stacks
 				add_to_matched_image( 
 					&s_stacks[ params.N * idx2(tid, wid, warpSize) ],
 					&s_patches_in_stack[ idx2(tid, wid, warpSize) ],
-					uint2float1(q.x,q.y,diff),
+					diff,
 					params
 				);
 			}
@@ -214,28 +219,28 @@ void block_matching(
 	{
 		uint count = 0;
 		uint minIdx = 0;
-		uint2float1 minVal(0,0,0x7f800000); //INF
+		uint minVal = 0xFFFFFFFF; //INF
 		
 		//Finds patch with minimal value of remaining
 		for (int i = minIdx; i < num_warps; ++i)
 		{
-			count = s_patches_in_stack[ idx2(tid, i, warpSize) ];
+			count = (uint)s_patches_in_stack[ idx2(tid, i, warpSize) ];
 			if (count == 0) continue;
 
-			uint2float1 newMinVal = s_stacks[ idx3(count-1,tid,i,params.N,warpSize) ];
-			if (newMinVal.val < minVal.val)
+			uint newMinVal = s_stacks[ idx3(count-1,tid,i,params.N,warpSize) ];
+			if (newMinVal < minVal)
 			{
 				minVal = newMinVal;
 				minIdx = i;
 			}
 		}
-		if (minVal.val == 0x7f800000) break; //All stacks are empty
+		if (minVal == 0xFFFFFFFF) break; //All stacks are empty
 		
 		//Remove patch from shared stack
 		s_patches_in_stack[ idx2(tid, minIdx, warpSize) ]--;
 	
 		//Adds patch to stack in global memory
-		g_stacks[ idx3(j, block_address_x, blockIdx.y, params.N, batch_size) ] = make_uint2(minVal.x,minVal.y);
+		g_stacks[idx3(j, block_address_x, blockIdx.y, params.N, batch_size)] = (ushort)(minVal & 0xFFFF);
 	}
 	//Save to the global memory the number of similar patches rounded to the nearest lower power of two
 	g_num_patches_in_stack[ idx2(block_address_x ,blockIdx.y, batch_size) ] = flp2((uint)j+1)-1;
@@ -244,7 +249,7 @@ void block_matching(
 
 extern "C" void run_block_matching(
 	const  uchar* __restrict image, //Original image
-	uint2* stacks, 					//For each reference patch contains addresses of similar patches (patch is adressed by top left corner)
+	ushort* stacks, 					//For each reference patch contains addresses of similar patches (patch is adressed by top left corner)
 	uint* num_patches_in_stack,		//For each reference patch contains number of similar patches
 	const uint2 image_dim,			//Image dimensions
 	const uint2 stacks_dim,			//size of area where reference patches could be located

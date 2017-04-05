@@ -115,7 +115,7 @@ __global__
 void get_block(
 		const uint2 start_point, 				//IN: first reference patch of a batch
 		const uchar* __restrict image,				//IN: image
-		const uint2* __restrict stacks,				//IN: array of adresses of similar patches
+		const ushort* __restrict stacks,				//IN: array of adresses of similar patches
 		const uint* __restrict g_num_patches_in_stack,		//IN: numbers of patches in 3D groups
 		float* patch_stack,					//OUT: assembled 3D groups
 		const uint2 image_dim,					//IN: image dimensions
@@ -132,14 +132,16 @@ void get_block(
 	
 	patch_stack += startidx;
 	
-	const uint2* z_ptr = &stacks[ idx3(0, blockIdx.x, blockIdx.y, params.N,  gridDim.x) ];
+	const ushort* z_ptr = &stacks[ idx3(0, blockIdx.x, blockIdx.y, params.N,  gridDim.x) ];
 
 	uint num_patches = g_num_patches_in_stack[ idx2(blockIdx.x, blockIdx.y, gridDim.x) ];
 	
 	patch_stack[ idx3(threadIdx.x, threadIdx.y, 0, params.k, params.k) ] = (float)(image[ idx2(outer_address.x+threadIdx.x, outer_address.y+threadIdx.y, image_dim.x)]);
 	for(uint i = 0; i < num_patches; ++i)
 	{
-		patch_stack[ idx3(threadIdx.x, threadIdx.y, i+1, params.k, params.k) ] = (float)(image[ idx2(z_ptr[i].x+threadIdx.x, z_ptr[i].y+threadIdx.y, image_dim.x)]);
+		int x = (int)((signed char)(z_ptr[i] & 0xFF));
+		int y = (int)((signed char)((z_ptr[i] >> 8) & 0xFF));
+		patch_stack[ idx3(threadIdx.x, threadIdx.y, i+1, params.k, params.k) ] = (float)(image[ idx2(outer_address.x+x+threadIdx.x, outer_address.y+y+threadIdx.y, image_dim.x)]);
 	}
 }
 
@@ -230,7 +232,7 @@ void aggregate_block(
 	const uint2 start_point,			//IN: first reference patch of a batch
 	const float* __restrict patch_stack,		//IN: 3D groups with thransfomed patches
 	const float* __restrict w_P,			//IN: weight for each 3D group
-	const uint2* __restrict stacks,			//IN: array of adresses of similar patches
+	const ushort* __restrict stacks,			//IN: array of adresses of similar patches
 	const float* __restrict kaiser_window,		//IN: kaiser window
 	float* numerator,				//IN/OUT: numerator aggregation buffer (have to be initialized to 0)
 	float* denominator,				//IN/OUT: denominator aggregation buffer (have to be initialized to 0)
@@ -252,15 +254,21 @@ void aggregate_block(
 
 	float wp = w_P[ idx2(blockIdx.x, blockIdx.y, gridDim.x ) ];
 	
-	const uint2* z_ptr = &stacks[ idx3(0, blockIdx.x, blockIdx.y, params.N,  gridDim.x) ];
+	const ushort* z_ptr = &stacks[ idx3(0, blockIdx.x, blockIdx.y, params.N,  gridDim.x) ];
 
 	float kaiser_value = kaiser_window[ idx2(threadIdx.x, threadIdx.y, params.k) ];
 
 	for(uint z = 0; z < num_patches; ++z)
 	{
-		uint2 path_address = (z == 0) ? outer_address : z_ptr[z-1];
+		int x = 0;
+		int y = 0;
+		if (z > 0) {
+			x = (int)((signed char)(z_ptr[z-1] & 0xFF));
+			y = (int)((signed char)((z_ptr[z-1] >> 8) & 0xFF));
+		}
+
 		float value = ( patch_stack[ idx3(threadIdx.x, threadIdx.y, z, params.k, params.k) ]);
-		int idx = idx2(path_address.x + threadIdx.x, path_address.y + threadIdx.y, image_dim.x);
+		int idx = idx2(outer_address.x + x + threadIdx.x, outer_address.y + y + threadIdx.y, image_dim.x);
 		atomicAdd(numerator + idx, value * kaiser_value * wp);
 		atomicAdd(denominator + idx, kaiser_value * wp);
 	}
@@ -374,7 +382,7 @@ void wiener_filtering(
 extern "C" void run_get_block(
 	const uint2 start_point,
 	const uchar* __restrict image,
-	const uint2* __restrict stacks,
+	const ushort* __restrict stacks,
 	const uint* __restrict num_patches_in_stack,
 	float* patch_stack,
 	const uint2 image_dim,
@@ -420,7 +428,7 @@ extern "C" void run_aggregate_block(
 	const uint2 start_point,
 	const float* __restrict patch_stack,	
 	const float* __restrict w_P,
-	const uint2* __restrict stacks,
+	const ushort* __restrict stacks,
 	const float* __restrict kaiser_window,
 	float* numerator,
 	float* denominator,

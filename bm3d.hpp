@@ -32,7 +32,7 @@
 
 extern "C" void run_block_matching(
 	const  uchar* __restrict image,
-	uint2* stacks,
+	ushort* stacks,
 	uint* num_patches_in_stack,
 	const uint2 image_dim,
 	const uint2 stacks_dim,
@@ -46,7 +46,7 @@ extern "C" void run_block_matching(
 extern "C" void run_get_block(
 	const uint2 start_point,
 	const uchar* __restrict image,
-	const uint2* __restrict stacks,
+	const ushort* __restrict stacks,
 	const uint* __restrict num_patches_in_stack,
 	float* patch_stack,
 	const uint2 image_dim,
@@ -88,7 +88,7 @@ extern "C" void run_aggregate_block(
 	const uint2 start_point,
 	const float* __restrict patch_stack,	
 	const float* __restrict w_P,
-	const uint2* __restrict stacks,
+	const ushort* __restrict stacks,
 	const float* __restrict kaiser_window,
 	float* numerator,
 	float* denominator,
@@ -145,7 +145,7 @@ private:
 	std::vector<uchar*> d_denoised_image;
 	
 	//Auxiliary arrays
-	uint2* d_stacks;					//Addresses of similar patches to each reference patch of a batch
+	ushort* d_stacks;					//Addresses of similar patches to each reference patch of a batch
 	std::vector<float*> d_numerator;	//Numerator used for aggregation
 	std::vector<float*> d_denominator;	//Denminator used for aggregation
 	uint* d_num_patches_in_stack;		//Number of similar patches for each referenca patch of a batch that are stored in d_stacks
@@ -177,7 +177,7 @@ private:
 		int maxk = std::max(h_wien_params.k,h_hard_params.k);
 		int maxN = std::max(h_wien_params.N,h_hard_params.N);
 
-		cuda_error_check( cudaMalloc((void**)&d_stacks, sizeof(uint2) * h_batch_size.x * h_batch_size.y * maxN) );
+		cuda_error_check( cudaMalloc((void**)&d_stacks, sizeof(ushort) * h_batch_size.x * h_batch_size.y * maxN) );
 
 		cuda_error_check( cudaMalloc((void**)&d_num_patches_in_stack, sizeof(uint) * h_batch_size.x * h_batch_size.y ) );
 
@@ -264,25 +264,29 @@ private:
 		uint & s_mem_size)		//OUT: shared memory size
 	{
 		//Determine number of warps form block-matching according to the size of shared memory. 
-		const uint p_block_width = (properties.warpSize * params.p) + params.k - 1;
+		const uint p_block_width = ((properties.warpSize-1) * params.p) + params.k;
 		const uint s_image_p_size = p_block_width * params.k * sizeof(uchar);
 
 		const float shared_mem_usage = 1.0f; // 0 - 1
 		const uint shared_mem_avaliable = (uint)(properties.sharedMemPerBlock * shared_mem_usage) - s_image_p_size;
 
 		//Block-matching shared memory sizes per warp
-		const uint s_diff_size = p_block_width * sizeof(float);
-		const uint s_patches_in_stack_size = properties.warpSize * sizeof(uint);
-		const uint s_patch_stacks_size = params.N * properties.warpSize * sizeof(uint2float1);
+		const uint s_diff_size = p_block_width * sizeof(uint);
+		const uint s_patches_in_stack_size = properties.warpSize * sizeof(uchar);
+		const uint s_patch_stacks_size = params.N * properties.warpSize * sizeof(uint);
 
 		const uint num_warps = std::min(shared_mem_avaliable / (s_diff_size + s_patches_in_stack_size + s_patch_stacks_size),32u);
-		if (_verbose)
-			std::cout << "Number of warps: " << num_warps << std::endl;
-
+		
 		//Block-matching Launch parameters
 		s_mem_size = ((s_diff_size + s_patches_in_stack_size + s_patch_stacks_size) * num_warps) + s_image_p_size;		
 		num_threads = dim3(properties.warpSize*num_warps, 1);
 		num_blocks = dim3(h_batch_size.x / properties.warpSize, h_batch_size.y);
+
+		if (_verbose)
+		{
+			std::cout << "Shared memory : " << s_mem_size/1024 << "KB/" << properties.sharedMemPerBlock/1024 << "KB" << std::endl;
+			std::cout << "Number of warps: " << num_warps << std::endl;
+		}
 	}
 
 	/*
@@ -365,7 +369,7 @@ private:
 				cuda_error_check( cudaDeviceSynchronize() );
 
 				if (_verbose)
-					time_blockmatching.stop();
+					time_blockmatching.stop();				
 
 				for (int channel = 0; channel < channels; ++channel)
 				{
@@ -885,8 +889,8 @@ public:
 		//Copy back
 		copy_host_image(dst_image, width, height, channels);
 
-		if(_verbose)
-			std::cout << "Total time: " << total.getSeconds() << std::endl;
+		//if(_verbose)
+		std::cout << "Total time: " << total.getSeconds() << std::endl;
 	}
 
 	/*void denoise_device_image(uchar *src_image, uchar *dst_image, int width, int height, int channels, bool two_step)

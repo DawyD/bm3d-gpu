@@ -3,6 +3,7 @@
 
 typedef unsigned char uchar;
 typedef unsigned int uint;
+typedef unsigned short ushort;
 
 //Index handling
 #define idx2(x,y,dim_x) ( (x) + ((y)*(dim_x)) )
@@ -16,13 +17,12 @@ __device__ __forceinline__ T* idx2p(T* BaseAddress, uint Column, uint Row, uint 
 
 struct uint2float1
 {
-	uint x;
-	uint y;
+	short x;
+	short y;
 	float val;
 
-	__host__ __device__ uint2float1(uint x, uint y, float val) : x(x), y(y), val(val) { }
+	__host__ __device__ uint2float1(short x, short y, float val) : x(x), y(y), val(val) { }
 };
-
 
 
 #endif

@@ -7,7 +7,7 @@ struct Params
 	RESTRICTIONS:
 		k must be divisible by p
 	*/
-	unsigned int n;		// Area in which the similar blocks are searched
+	unsigned int n;		// Half of area (in each dim) in which the similar blocks are searched
 	unsigned int k;		// width and height of a patch
 	unsigned int N;		// Maximal number of similar blocks in stack (without reference block)
 	unsigned int T;		// Distance treshold under which two blocks are assumed simialr //DEV: NOT NECESSARY

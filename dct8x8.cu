@@ -1,3 +1,6 @@
+#include "indices.cuh"
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
 /*
  * Based on dct8x8_kernel2.cu provided in CUDA samples form NVIDIA Corporation.
  *
