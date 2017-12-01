@@ -1,11 +1,11 @@
-bm3d-gpu
+BM3D-GPU
 ========
 
 CUDA-accelerated implementation of BM3D image denoising method
 
 Author    : David Honzátko <honzatko@ksi.mff.cuni.cz>
 
-# UNIX/LINUX USER GUIDE
+# Unix/Linux User Guide
 
 The code is compilable on Unix/Linux. 
 
@@ -53,3 +53,13 @@ Example of color denoising by both steps of BM3D:
 Example of grayscale denoising by both steps of BM3D with PSNR computation:
 
     ./bm3d lena_25.png lena_den.png 25 nocolor twostep quiet lena.png
+    
+# Citation
+If you find this implementation useful please cite the following paper in your work:
+
+    @article{bm3d-gpu,
+        author = {Honzátko, David and Kruliš, Martin},
+        year = {2017}, month = {11},
+        title = {Accelerating block-matching and 3D filtering method for image denoising on GPUs},
+        booktitle = {Journal of Real-Time Image Processing}
+    }
