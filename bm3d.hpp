@@ -71,6 +71,7 @@ extern "C" void run_hard_treshold_block(
 	const uint* __restrict num_patches_in_stack,
 	const uint2 stacks_dim,
 	const Params params,
+	const uint sigma,
 	const dim3 num_threads,
 	const dim3 num_blocks,
 	const uint shared_memory_size
@@ -117,6 +118,7 @@ extern "C" void run_wiener_filtering(
 	const uint* __restrict num_patches_in_stack,
 	uint2 stacks_dim,
 	const Params params,
+	const uint sigma,
 	const dim3 num_threads,
 	const dim3 num_blocks,
 	const uint shared_memory_size
@@ -292,7 +294,7 @@ private:
 	/*
 	Launch first step of BM3D. It produces basic estimate in denoised_image arrays.
 	*/
-	void first_step(std::vector<uchar*> & denoised_image, int width, int height, int channels)
+	void first_step(std::vector<uchar*> & denoised_image, int width, int height, int channels, uint* sigma)
 	{	
 		//image dimensions
 		const uint2 image_dim = make_uint2(width,height);
@@ -426,6 +428,7 @@ private:
 						d_num_patches_in_stack,	//IN: Numbers of patches in 3D groups
 						stacks_dim,				//IN: Dimensions limiting addresses of reference patches
 						h_hard_params,			//IN: Denoising parameters
+						sigma[channel],			//IN: sigma
 						num_threads,			//CUDA: Threads in block
 						num_blocks,				//CUDA: Blocks in grid
 						s_size_t				//CUDA: Shared memory size
@@ -507,7 +510,7 @@ private:
 
 	}
 
-	void second_step(std::vector<uchar*> & denoised_image, int width, int height, int channels)
+	void second_step(std::vector<uchar*> & denoised_image, int width, int height, int channels, uint* sigma)
 	{	
 		//Image dimensions
 		const uint2 image_dim = make_uint2(width,height);
@@ -666,6 +669,7 @@ private:
 						d_num_patches_in_stack,		//IN: Numbers of patches in 3D groups
 						stacks_dim,					//IN: Dimensions limiting addresses of reference patches
 						h_wien_params,				//IN: Denoising parameters
+						sigma[channel],				//IN: Noise variance
 						num_threads,				//CUDA: Threads in block
 						num_blocks,					//CUDA: Blocks in grid
 						s_size_t					//CUDA: Shared memory size
@@ -821,9 +825,9 @@ public:
 
 		h_batch_size = make_uint2(256,128);
 	}
-	BM3D(uint n, uint k, uint N, uint T, uint p, float sigma, float L3D, bool seceon_step) : 
-		h_hard_params(n, k, N, T, p, sigma, L3D),
-		h_wien_params(n, k, N, T, p, sigma, L3D),
+	BM3D(uint n, uint k, uint N, uint T, uint p, float L3D, bool seceon_step) : 
+		h_hard_params(n, k, N, T, p, L3D),
+		h_wien_params(n, k, N, T, p, L3D),
 		d_gathered_stacks(0), d_gathered_stacks_basic(0), d_w_P(0), d_stacks(0), d_num_patches_in_stack(0),
 		h_reserved_width(0), h_reserved_height(0), h_reserved_channels(0), h_reserved_two_step(0), d_kaiser_window(0), _verbose(false)
 	{
@@ -849,7 +853,7 @@ public:
 	src_image and dst_image are arrays allocated in the host memory and the pixels are stored here by the channels. 
 	First width*height pixels represent luma (Y) component and each following width*height pixels represent color components
 	*/
-	void denoise_host_image(uchar *src_image, uchar *dst_image, int width, int height, int channels, bool two_step)
+	void denoise_host_image(uchar *src_image, uchar *dst_image, int width, int height, int channels, uint* sigma, bool two_step)
 	{
 		Stopwatch total;
 		total.start();
@@ -869,7 +873,7 @@ public:
 
 		//1st denoising step
 		null_aggregation_buffers(width,height);
-		first_step(d_denoised_image, width, height, channels);
+		first_step(d_denoised_image, width, height, channels, sigma);
 
 		p1.stop();
 		if (_verbose)
@@ -881,7 +885,7 @@ public:
 			Stopwatch p2;
 			p2.start();
 			null_aggregation_buffers(width,height);
-			second_step(d_denoised_image, width, height, channels);
+			second_step(d_denoised_image, width, height, channels, sigma);
 			if (_verbose)
 				std::cout << "2nd step took: " << p2.getSeconds() << std::endl;
 		}
@@ -898,29 +902,29 @@ public:
 		//TODO
 	}*/
 
-	void set_hard_params(uint n, uint k, uint N, uint T, uint p, float sigma, float L3D)
+	void set_hard_params(uint n, uint k, uint N, uint T, uint p, float L3D)
 	{
 		if (h_hard_params.k != k || h_hard_params.N != N)
 		{
-			h_hard_params = Params(n,k,N,T,p,sigma,L3D);
+			h_hard_params = Params(n,k,N,T,p,L3D);
 			free_device_auxiliary_arrays();
 			allocate_device_auxiliary_arrays();
 		}
 		else
-			h_hard_params = Params(n,k,N,T,p,sigma,L3D);
+			h_hard_params = Params(n,k,N,T,p,L3D);
 		
 		if (k != 8) 
 			throw std::invalid_argument("k has to be 8, other values not implemented yet.");
 	}
-	void set_wien_params(uint n, uint k, uint N, uint T, uint p, float sigma)
+	void set_wien_params(uint n, uint k, uint N, uint T, uint p)
 	{
 		if (h_wien_params.k != k || h_wien_params.N != N){
-			h_wien_params = Params(n,k,N,T,p,sigma,0.0);
+			h_wien_params = Params(n,k,N,T,p,0.0);
 			free_device_auxiliary_arrays();
 			allocate_device_auxiliary_arrays();
 		}
 		else
-			h_wien_params = Params(n,k,N,T,p,sigma,0.0);
+			h_wien_params = Params(n,k,N,T,p,0.0);
 		
 		if (k != 8) 
 			throw std::invalid_argument("k has to be 8, other values not implemented yet.");

@@ -154,12 +154,13 @@ Division: Each block delas with one transformed patch stack. (number of threads 
 */
 __global__
 void hard_treshold_block(
-	const uint2 start_point,			//IN: first reference patch of a batch
+	const uint2 start_point,		//IN: first reference patch of a batch
 	float* patch_stack,				//IN/OUT: 3D groups with thransfomed patches
 	float*  w_P,					//OUT: weight of each 3D group
 	const uint* __restrict g_num_patches_in_stack,	//IN: numbers of patches in 3D groups
 	uint2 stacks_dim,				//IN: dimensions limiting addresses of reference patches
-	const Params params				//IN: denoising parameters
+	const Params params,			//IN: denoising parameters
+	const uint sigma				//IN: noise variance
 )
 {
 	extern __shared__ float data[];  
@@ -188,7 +189,7 @@ void hard_treshold_block(
 	
 	//Hard-thresholding + counting of nonzero coefficients
 	uint nonzero = 0;
-	float threshold = params.L3Ds * sqrtf((float)num_patches);
+	float threshold = params.L3D * sqrtf((float)(num_patches * sigma));
 	for(int i = 0; i < num_patches; ++i)
 	{
 		if (fabsf(s_patch_stack[ i ]) < threshold)
@@ -306,7 +307,8 @@ void wiener_filtering(
 	float* w_P,										//OUT: Weigths of 3D groups
 	const uint* __restrict g_num_patches_in_stack,	//IN: numbers of patches in 3D groups
 	uint2 stacks_dim,								//IN: dimensions limiting addresses of reference patches
-	const Params params								//IN: denoising parameters
+	const Params params,							//IN: denoising parameters
+	const uint sigma								//IN: Noise variance
 )
 {
 	extern __shared__ float data[];
@@ -348,7 +350,7 @@ void wiener_filtering(
 	for(int i = 0; i < num_patches; ++i)
 	{
 		float wien = abspow2(s_patch_stack_basic[i]) * normcoeff;
-		wien /= (wien + params.sigmap2);
+		wien /= (wien + sigma);
 		s_patch_stack[i] *= wien * normcoeff;
 		wien_sum += wien*wien;
 	}
@@ -410,6 +412,7 @@ extern "C" void run_hard_treshold_block(
 	const uint* __restrict num_patches_in_stack,
 	const uint2 stacks_dim,
 	const Params params,
+	const uint sigma,
 	const dim3 num_threads,
 	const dim3 num_blocks,
 	const uint shared_memory_size)
@@ -420,7 +423,8 @@ extern "C" void run_hard_treshold_block(
 		w_P,
 		num_patches_in_stack,
 		stacks_dim,
-		params
+		params,
+		sigma
 	);
 }
 
@@ -479,6 +483,7 @@ extern "C" void run_wiener_filtering(
 	const uint* __restrict num_patches_in_stack,
 	uint2 stacks_dim,
 	const Params params,
+	const uint sigma,
 	const dim3 num_threads,
 	const dim3 num_blocks,
 	const uint shared_memory_size
@@ -491,6 +496,7 @@ extern "C" void run_wiener_filtering(
 		w_P,
 		num_patches_in_stack,
 		stacks_dim,
-		params
+		params,
+		sigma
 	);
 }

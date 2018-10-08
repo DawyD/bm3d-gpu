@@ -36,9 +36,9 @@ int main(int argc, char** argv)
 	{
 		std::cout << "Sigma = " << sigma << std::endl;
 		if (twostep)
-			std::cout << "#Steps: 2" << std::endl;
+			std::cout << "Number of Steps: 2" << std::endl;
 		else
-			std::cout << "#Steps: 1" << std::endl;
+			std::cout << "Number of Steps: 1" << std::endl;
 
 		if (channels > 1)
 			std::cout << "Color denoising: yes" << std::endl;
@@ -49,10 +49,24 @@ int main(int argc, char** argv)
 	//Allocate images
 	CImg<unsigned char> image(argv[1]);
 	CImg<unsigned char> image2(image.width(), image.height(), 1, channels, 0);
+	std::vector<unsigned int> sigma2(channels);
+	sigma2[0] = 25 * 25;
 	
 	//Convert color image to YCbCr color space
 	if (channels == 3)
-		image = image.get_channels(0,2).RGBtoYCbCr();
+	{
+		image = image.get_channels(0, 2).RGBtoYCbCr();
+		//Convert the sigma^2 variance to the YCbCr color space
+		long s = sigma * sigma;
+		sigma2[0] = ((66l*66l*s + 129l*129l*s + 25l*25l*s) / (256l*256l));
+		sigma2[1] = ((38l*38l*s + 74l*74l*s + 112l*112l*s) / (256l*256l)),
+		sigma2[2] = ((112l*112l*s + 94l*94l*s + 18l*18l*s) / (256l*256l));
+	}
+
+	std::cout << "Noise variance for individual channels (YCrCb if color): ";
+	for (unsigned int k = 0; k < sigma2.size(); k++)
+		std::cout << sigma2[k] << " ";
+	std::cout << std::endl;
 
 	// Check for invalid input
 	if(! image.data() )							
@@ -68,15 +82,17 @@ int main(int argc, char** argv)
 	try {
 		BM3D bm3d;
 		//		    (n, k,N, T,   p,sigma, L3D)
-		bm3d.set_hard_params(19,8,16,2500,3,sigma, 2.7f);
-		bm3d.set_wien_params(19,8,32,400, 3,sigma);
+		bm3d.set_hard_params(19,8,16,2500,3, 2.7f);
+		bm3d.set_wien_params(19,8,32,400, 3);
 		bm3d.set_verbose(verbose);
-		bm3d.denoise_host_image(image.data(),
-				 image2.data(),
-				 image.width(),
-				 image.height(),
-				 channels,
-				 twostep);
+		bm3d.denoise_host_image(
+				image.data(),
+				image2.data(),
+				image.width(),
+				image.height(),
+				channels,
+				sigma2.data(),
+				twostep);
 	}
 	catch(std::exception & e)  {
 		std::cerr << "There was an error while processing image: " << std::endl << e.what() << std::endl;
