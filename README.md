@@ -26,20 +26,20 @@ Usage:
 
 2. Create build directory, create the makefiles using cmake and compile the application
 Run 
-
-    mkdir build
-    cd build
-    cmake ..
-    make
-
+```
+mkdir build
+cd build
+cmake ..
+make
+```
 3. Run CUDA-accelerated BM3D image denoising application
-
-    ./bm3d
-
+```
+./bm3d
+```
 The generic way to run the code is:
-
-    ./bm3d NoisyImage.png DenoisedImage.png sigma [color [twostep [quiet [ReferenceImage]]]]
-
+```
+./bm3d NoisyImage.png DenoisedImage.png sigma [color [twostep [quiet [ReferenceImage]]]]
+```
 Options:
 - color - color image denoising (experimental only)
 - twostep - process both steps of the BM3D method
@@ -47,16 +47,17 @@ Options:
 - ReferenceImage - if provided, computes and prints PSNR between the ReferenceImage and DenoisedImage
 
 Example of gray-scale denoising by the fisrt step of BM3D:
-
-    ./bm3d lena_20.png lena_den.png 20
+```
+./bm3d lena_20.png lena_den.png 20
+```
 Example of color denoising by both steps of BM3D:
-
-    ./bm3d lena_20_color.png lena_den_color.png 20 color twostep
-
+```
+./bm3d lena_20_color.png lena_den_color.png 20 color twostep
+```
 Example of grayscale denoising by both steps of BM3D with PSNR computation:
-
-    ./bm3d lena_25.png lena_den.png 25 nocolor twostep quiet lena.png
-    
+```
+./bm3d lena_25.png lena_den.png 25 nocolor twostep quiet lena.png
+``` 
 # Citation
 If you find this implementation useful please cite the following paper in your work:
 
