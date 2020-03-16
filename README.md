@@ -10,7 +10,7 @@ Author    : David Honzátko <honzatko@ksi.mff.cuni.cz>
 The code is compilable on Unix/Linux. 
 
 - Compilation. 
-Automated compilation requires the make program.
+Automated compilation requires the cmake program.
 
 - Libraries. 
 This code requires the CUDA toolkit installed.
@@ -24,9 +24,12 @@ Usage:
 
 1. Download the code package and extract it. Go to that directory. 
 
-2. Compile the source code (on Unix/Linux).
+2. Create build directory, create the makefiles using cmake and compile the application
 Run 
 
+    mkdir build
+    cd build
+    cmake ..
     make
 
 3. Run CUDA-accelerated BM3D image denoising application
