@@ -10,7 +10,19 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # The following lines build the main executable.
-add_executable(bm3d
+#add_executable(bm3d
+#	include/CImg.h
+#	include/stopwatch.hpp
+#	include/indices.cuh
+#	include/params.hpp
+#	include/bm3d.hpp
+#	src/filtering.cu
+#	src/blockmatching.cu
+#	src/dct8x8.cu
+#	src/main_nodisplay.cpp
+#)
+
+add_library(bm3d
 	include/CImg.h
 	include/stopwatch.hpp
 	include/indices.cuh
@@ -19,7 +31,6 @@ add_executable(bm3d
 	src/filtering.cu
 	src/blockmatching.cu
 	src/dct8x8.cu
-	src/main_nodisplay.cpp
 )
 
 target_link_libraries(bm3d cufft cudart png)
