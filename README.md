@@ -3,7 +3,7 @@ BM3D-GPU
 
 CUDA-accelerated implementation of BM3D image denoising method
 
-Author    : David Honzátko <honzatko@ksi.mff.cuni.cz>
+Author    : David Honzátko <david.honzatko@epfl.ch>
 
 # Unix/Linux User Guide
 
