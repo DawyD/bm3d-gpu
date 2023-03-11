@@ -220,6 +220,24 @@ private:
 
 	}
 
+	//Allocate device buffers dependent on image dimensions
+	void allocate_device_image_partial(uint width, uint height, uint channels)
+	{
+		d_numerator.resize(channels);
+		d_denominator.resize(channels);
+
+		int size = width * height;
+
+		for(auto & it : d_numerator) {
+			cuda_error_check( cudaMalloc((void**)&it, sizeof(float) * size) );
+		}
+
+		for(auto & it : d_denominator) {
+			cuda_error_check( cudaMalloc((void**)&it, sizeof(float) * size) );
+		}
+
+	}
+
 	//Creates an kaiser window (only for k = 8, alpha = 2.0) and copies it to the device.
 	void prepare_kaiser_window(uint k)
 	{
@@ -294,7 +312,7 @@ private:
 	/*
 	Launch first step of BM3D. It produces basic estimate in denoised_image arrays.
 	*/
-	void first_step(std::vector<uchar*> & denoised_image, int width, int height, int channels, uint* sigma)
+	void first_step(std::vector<uchar*> & d_noisy_image, std::vector<uchar*> & denoised_image, int width, int height, int channels, uint* sigma)
 	{	
 		//image dimensions
 		const uint2 image_dim = make_uint2(width,height);
@@ -510,7 +528,12 @@ private:
 
 	}
 
-	void second_step(std::vector<uchar*> & denoised_image, int width, int height, int channels, uint* sigma)
+	void first_step(std::vector<uchar*> & denoised_image, int width, int height, int channels, uint* sigma)
+	{
+		first_step(this->d_noisy_image, denoised_image, width, height, channels, sigma);
+	}
+
+	void second_step(std::vector<uchar*> & d_noisy_image, std::vector<uchar*> & denoised_image, int width, int height, int channels, uint* sigma)
 	{	
 		//Image dimensions
 		const uint2 image_dim = make_uint2(width,height);
@@ -573,7 +596,7 @@ private:
 					time_blockmatching.start();
 
 				run_block_matching(
-					d_denoised_image[0],	// IN: Image	
+					denoised_image[0],		// IN: Image
 					d_stacks,				// OUT: Array of adresses of similar patches
 					d_num_patches_in_stack,	// OUT: Number of blocks on each adress
 					image_dim,				// IN: Image dimensions
@@ -599,7 +622,7 @@ private:
 					//Get patches from basic image estimate to 3D auxiliary array according to the addresess form block-matching
 					run_get_block(
 						start_point,				//IN: First reference patch of a batch
-						d_denoised_image[channel], 	//IN: Basic image estimate (produced by 1st step)
+						denoised_image[channel], 	//IN: Basic image estimate (produced by 1st step)
 						d_stacks,					//IN: Array of adresses of similar patches
 						d_num_patches_in_stack,		//IN: Numbers of patches in 3D groups
 						d_gathered_stacks_basic,	//OUT: Assembled 3D groups
@@ -752,6 +775,11 @@ private:
 		}
 	}
 
+	void second_step(std::vector<uchar*> & denoised_image, int width, int height, int channels, uint* sigma)
+	{
+		second_step(this->d_noisy_image, denoised_image, width, height, channels, sigma);
+	}
+
 	//Copy image from device to host
 	void copy_host_image(uchar * dst_image, int width, int height, int channels)
 	{
@@ -893,14 +921,47 @@ public:
 		//Copy back
 		copy_host_image(dst_image, width, height, channels);
 
-		//if(_verbose)
-		std::cout << "Total time: " << total.getSeconds() << std::endl;
+		if(_verbose)
+			std::cout << "Total time: " << total.getSeconds() << std::endl;
 	}
 
-	/*void denoise_device_image(uchar *src_image, uchar *dst_image, int width, int height, int channels, bool two_step)
+	void denoise_device_image(std::vector<uchar*> & d_noisy_image, std::vector<uchar*> & d_denoised_image, int width, int height, int channels, uint* sigma, bool two_step)
 	{
-		//TODO
-	}*/
+		Stopwatch total;
+		total.start();
+
+		//Allocation
+		if (h_reserved_width != width || h_reserved_height != height || h_reserved_channels != channels || h_reserved_two_step != two_step)
+			reserve_partial(width, height, channels, two_step);
+
+		if (h_reserved_width == 0 || h_reserved_height == 0 || h_reserved_channels == 0 )
+			return;
+
+		Stopwatch p1;
+		p1.start();
+
+		//1st denoising step
+		null_aggregation_buffers(width,height);
+		first_step(d_noisy_image, d_denoised_image, width, height, channels, sigma);
+
+		p1.stop();
+		if (_verbose)
+			std::cout << "1st step took: " << p1.getSeconds() << std::endl;
+
+		//2nd denoising step
+		if (two_step)
+		{
+			Stopwatch p2;
+			p2.start();
+			null_aggregation_buffers(width,height);
+			second_step(d_noisy_image, d_denoised_image, width, height, channels, sigma);
+			if (_verbose)
+				std::cout << "2nd step took: " << p2.getSeconds() << std::endl;
+		}
+
+		if(_verbose)
+			std::cout << "Total time: " << total.getSeconds() << std::endl;
+	}
 
 	void set_hard_params(uint n, uint k, uint N, uint T, uint p, float L3D)
 	{
@@ -948,6 +1009,21 @@ public:
 		allocate_device_image(width,height,channels);
 		allocate_device_auxiliary_arrays(); //TODO: not necessary
 	}
+
+	void reserve_partial(int width, int height, int channels, bool two_step)
+	{
+		h_reserved_width = width;
+		h_reserved_height = height;
+		h_reserved_channels = channels;
+		h_reserved_two_step = two_step;
+
+		free_device_image();
+		free_device_auxiliary_arrays(); //TODO: not necessary
+
+		allocate_device_image_partial(width, height, channels);
+		allocate_device_auxiliary_arrays(); //TODO: not necessary
+	}
+
 	void clear()
 	{
 		h_reserved_width = 0;
