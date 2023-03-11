@@ -50,7 +50,7 @@ int main(int argc, char** argv)
 	CImg<unsigned char> image(argv[1]);
 	CImg<unsigned char> image2(image.width(), image.height(), 1, channels, 0);
 	std::vector<unsigned int> sigma2(channels);
-	sigma2[0] = 25 * 25;
+	sigma2[0] = (unsigned int)(sigma * sigma);
 	
 	//Convert color image to YCbCr color space
 	if (channels == 3)
