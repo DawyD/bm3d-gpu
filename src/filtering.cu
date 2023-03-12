@@ -136,17 +136,13 @@ void get_block(
 	const ushort* z_ptr = &stacks[ idx3(0, blockIdx.x, blockIdx.y, params.N,  gridDim.x) ];
 
 	uint num_patches = g_num_patches_in_stack[ idx2(blockIdx.x, blockIdx.y, gridDim.x) ];
-	
-	// HSTODO
-	// patch_stack[ idx3(threadIdx.x, threadIdx.y, 0, params.k, params.k) ] = (float)(image[ idx2(outer_address.x+threadIdx.x, outer_address.y+threadIdx.y, image_dim.x)]);
-	patch_stack[ idx3(threadIdx.x, threadIdx.y, 0, params.k, params.k) ] = (float)((uchar*)((char*)image + (outer_address.y + threadIdx.y) * pitch))[outer_address.x + threadIdx.x];
+
+	patch_stack[idx3(threadIdx.x, threadIdx.y, 0, params.k, params.k)] = (float)image[(outer_address.y + threadIdx.y) * pitch + outer_address.x + threadIdx.x];
 	for(uint i = 0; i < num_patches; ++i)
 	{
 		int x = (int)((signed char)(z_ptr[i] & 0xFF));
 		int y = (int)((signed char)((z_ptr[i] >> 8) & 0xFF));
-		// HSTODO
-		// patch_stack[ idx3(threadIdx.x, threadIdx.y, i+1, params.k, params.k) ] = (float)(image[ idx2(outer_address.x+x+threadIdx.x, outer_address.y+y+threadIdx.y, image_dim.x)]);
-		patch_stack[ idx3(threadIdx.x, threadIdx.y, i+1, params.k, params.k) ] = (float)((uchar*)((char*)image + (outer_address.y + y + threadIdx.y) * pitch))[outer_address.x + x + threadIdx.x];
+		patch_stack[idx3(threadIdx.x, threadIdx.y, i+1, params.k, params.k)] = (float)image[(outer_address.y + y + threadIdx.y) * pitch + outer_address.x + x + threadIdx.x];
 	}
 }
 
@@ -275,12 +271,9 @@ void aggregate_block(
 		}
 
 		float value = ( patch_stack[ idx3(threadIdx.x, threadIdx.y, z, params.k, params.k) ]);
-		// HSTODO
-		// int idx = idx2(outer_address.x + x + threadIdx.x, outer_address.y + y + threadIdx.y, image_dim.x);
-		// atomicAdd(numerator + idx, value * kaiser_value * wp);
-		// atomicAdd(denominator + idx, kaiser_value * wp);
-		atomicAdd(&((float*)((char*)numerator   + (outer_address.y + y + threadIdx.y) * num_denom_pitch))[outer_address.x + x + threadIdx.x], value * kaiser_value * wp);
-		atomicAdd(&((float*)((char*)denominator + (outer_address.y + y + threadIdx.y) * num_denom_pitch))[outer_address.x + x + threadIdx.x], kaiser_value * wp);
+		const uint idx = (outer_address.y + y + threadIdx.y) * num_denom_pitch / sizeof(float) + outer_address.x + x + threadIdx.x;
+		atomicAdd(numerator + idx, value * kaiser_value * wp);
+		atomicAdd(denominator + idx, kaiser_value * wp);
 	}
 }
 

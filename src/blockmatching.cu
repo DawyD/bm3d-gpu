@@ -128,10 +128,7 @@ void block_matching(
 		int sx = i % p_rectangle_width;
 		int sy = i / p_rectangle_width;
 		if (p_rectangle_start+sx >= image_dim.x) continue;
-		// HSTODO
-		// s_image_p[i] = image[idx2(p_rectangle_start+sx,p.y+sy,image_dim.x)];
-		//s_image_p[i] = image[idx2(p_rectangle_start + sx, p.y + sy, image_dim.x * pitch / sizeof(uchar))]; ??
-		s_image_p[i] = ((uchar*)((char*)image + (p.y + sy) * pitch))[p_rectangle_start + sx];
+		s_image_p[i] = image[(p.y + sy) * pitch + p_rectangle_start + sx];
 	}
 	
 	__syncthreads();
@@ -170,9 +167,7 @@ void block_matching(
 				uint dist = 0;
 				for(uint iy = 0; iy < params.k; ++iy)
 				{
-					// HSTODO
-					//dist += L2p2((int)s_image_p[ idx2(i, iy, p_rectangle_width) ], (int)image[ idx2(q_rectangle_start+i, q.y+iy, image_dim.x) ]);
-					dist += L2p2((int)s_image_p[ idx2(i, iy, p_rectangle_width) ], (int)((uchar*)((char*)image + (q.y + iy) * pitch))[q_rectangle_start + i]);
+					dist += L2p2((int)s_image_p[idx2(i, iy, p_rectangle_width)], (int)image[(q.y + iy) * pitch + q_rectangle_start + i]);
 				}
 				s_diff[i] = dist;
 			}
