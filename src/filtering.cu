@@ -271,7 +271,7 @@ void aggregate_block(
 		}
 
 		float value = ( patch_stack[ idx3(threadIdx.x, threadIdx.y, z, params.k, params.k) ]);
-		const uint idx = (outer_address.y + y + threadIdx.y) * num_denom_pitch / sizeof(float) + outer_address.x + x + threadIdx.x;
+		const uint idx = (outer_address.y + y + threadIdx.y) * num_denom_pitch + outer_address.x + x + threadIdx.x;
 		atomicAdd(numerator + idx, value * kaiser_value * wp);
 		atomicAdd(denominator + idx, kaiser_value * wp);
 	}
@@ -293,7 +293,7 @@ void aggregate_final(
 	uint idy = blockIdx.y * blockDim.y + threadIdx.y;
 	if (idx >= image_dim.x || idy >= image_dim.y) return;
 
-	const uint index = idy * num_denom_pitch / sizeof(float) + idx;
+	const uint index = idy * num_denom_pitch + idx;
 	int value = lrintf(numerator[index] / denominator[index]);
 	if (value < 0) value = 0;
 	if (value > 255) value = 255;

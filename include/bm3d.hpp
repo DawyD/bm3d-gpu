@@ -168,8 +168,8 @@ private:
 	int h_reserved_channels;
 	bool h_reserved_two_step;
 	uint2 h_batch_size; 				//h_batch_size.x has to be divisible by properties.warpSize
-	size_t d_pitch_uchar;
-	size_t d_pitch_float;
+	size_t d_pitch_uchar; 				//bytes / sizeof(uchar)
+	size_t d_pitch_float; 				//bytes / sizeof(float)
 
 	//Denoising parameters
 	Params h_hard_params;
@@ -216,6 +216,7 @@ private:
 		for(auto & it : d_denoised_image) {
 			cuda_error_check(cudaMallocPitch((void**)&it, &d_pitch_uchar, byte_width, height));
 		}
+		d_pitch_uchar /= sizeof(uchar);
 
 		byte_width = width * sizeof(float);
 		for(auto & it : d_numerator) {
@@ -225,7 +226,7 @@ private:
 		for(auto & it : d_denominator) {
 			cuda_error_check(cudaMallocPitch((void**)&it, &d_pitch_float, byte_width, height));
 		}
-
+		d_pitch_float /= sizeof(float);
 	}
 
 	//Allocate device buffers dependent on image dimensions
@@ -242,7 +243,7 @@ private:
 		for(auto & it : d_denominator) {
 			cuda_error_check(cudaMallocPitch((void**)&it, &d_pitch_float, byte_width, height));
 		}
-
+		d_pitch_float /= sizeof(float);
 	}
 
 	//Creates an kaiser window (only for k = 8, alpha = 2.0) and copies it to the device.
