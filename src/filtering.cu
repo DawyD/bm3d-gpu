@@ -293,14 +293,11 @@ void aggregate_final(
 	uint idy = blockIdx.y * blockDim.y + threadIdx.y;
 	if (idx >= image_dim.x || idy >= image_dim.y) return;
 
-	// HSTODO
-	// int value = lrintf(numerator[ idx2(idx,idy,image_dim.x) ] / denominator[ idx2(idx,idy,image_dim.x) ] );
-	int value = lrintf(((float*)((char*)numerator + idy * num_denom_pitch))[idx] / ((float*)((char*)denominator + idy * num_denom_pitch))[idx]);
+	const uint index = idy * num_denom_pitch / sizeof(float) + idx;
+	int value = lrintf(numerator[index] / denominator[index]);
 	if (value < 0) value = 0;
 	if (value > 255) value = 255;
-	// HSTODO
-	// image_o[ idx2(idx,idy,image_dim.x) ] = (uchar)value;
-	((uchar*)((char*)image_o + idy * image_pitch))[idx] = (uchar)value;
+	image_o[idy * image_pitch + idx] = (uchar)value;
 }
 
 
