@@ -81,8 +81,8 @@ void denoise_device_image(
 )
 ```
 
-where\
-\
+where
+
 `d_noisy_image` is a vector of **device** pointers to each channel of the noisy image,\
 `d_denoised_image` is a vector of **device** pointers to each channel of the filtered image,\
 `pitch` specifies the [pitch of the images](https://docs.nvidia.com/cuda/cuda-c-programming-guide/#device-memory) as `total bytes per row / sizeof(uchar)`,\
@@ -90,7 +90,7 @@ where\
 `height` specifies the height of the images,\
 `channels` specifies the number of channels,\
 `sigma` specifies the BM3D sigma parameter, and\
-`two_step` specifies whether to process both steps of the BM3D method.\
+`two_step` specifies whether to process both steps of the BM3D method.
 
 It should be noted that both images must be allocated in GPU memory before this function is called.
 
