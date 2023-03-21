@@ -115,6 +115,7 @@ __global__
 void get_block(
 		const uint2 start_point, 				//IN: first reference patch of a batch
 		const uchar* __restrict image,				//IN: image
+		const size_t pitch,							//IN: pitch of image
 		const ushort* __restrict stacks,				//IN: array of adresses of similar patches
 		const uint* __restrict g_num_patches_in_stack,		//IN: numbers of patches in 3D groups
 		float* patch_stack,					//OUT: assembled 3D groups
@@ -135,13 +136,13 @@ void get_block(
 	const ushort* z_ptr = &stacks[ idx3(0, blockIdx.x, blockIdx.y, params.N,  gridDim.x) ];
 
 	uint num_patches = g_num_patches_in_stack[ idx2(blockIdx.x, blockIdx.y, gridDim.x) ];
-	
-	patch_stack[ idx3(threadIdx.x, threadIdx.y, 0, params.k, params.k) ] = (float)(image[ idx2(outer_address.x+threadIdx.x, outer_address.y+threadIdx.y, image_dim.x)]);
+
+	patch_stack[idx3(threadIdx.x, threadIdx.y, 0, params.k, params.k)] = (float)image[(outer_address.y + threadIdx.y) * pitch + outer_address.x + threadIdx.x];
 	for(uint i = 0; i < num_patches; ++i)
 	{
 		int x = (int)((signed char)(z_ptr[i] & 0xFF));
 		int y = (int)((signed char)((z_ptr[i] >> 8) & 0xFF));
-		patch_stack[ idx3(threadIdx.x, threadIdx.y, i+1, params.k, params.k) ] = (float)(image[ idx2(outer_address.x+x+threadIdx.x, outer_address.y+y+threadIdx.y, image_dim.x)]);
+		patch_stack[idx3(threadIdx.x, threadIdx.y, i+1, params.k, params.k)] = (float)image[(outer_address.y + y + threadIdx.y) * pitch + outer_address.x + x + threadIdx.x];
 	}
 }
 
@@ -237,6 +238,7 @@ void aggregate_block(
 	const float* __restrict kaiser_window,		//IN: kaiser window
 	float* numerator,				//IN/OUT: numerator aggregation buffer (have to be initialized to 0)
 	float* denominator,				//IN/OUT: denominator aggregation buffer (have to be initialized to 0)
+	const size_t num_denom_pitch,	//IN: pitch of numerator and denominator aggregation buffer
 	const uint* __restrict g_num_patches_in_stack,	//IN: numbers of patches in 3D groups
 	const uint2 image_dim,				//IN: image dimensions
 	const uint2 stacks_dim,				//IN: dimensions limiting addresses of reference patches
@@ -269,7 +271,7 @@ void aggregate_block(
 		}
 
 		float value = ( patch_stack[ idx3(threadIdx.x, threadIdx.y, z, params.k, params.k) ]);
-		int idx = idx2(outer_address.x + x + threadIdx.x, outer_address.y + y + threadIdx.y, image_dim.x);
+		const uint idx = (outer_address.y + y + threadIdx.y) * num_denom_pitch + outer_address.x + x + threadIdx.x;
 		atomicAdd(numerator + idx, value * kaiser_value * wp);
 		atomicAdd(denominator + idx, kaiser_value * wp);
 	}
@@ -282,17 +284,20 @@ __global__
 void aggregate_final(
 	const float* __restrict numerator,	//IN: numerator aggregation buffer
 	const float* __restrict denominator,	//IN: denominator aggregation buffer
+	const size_t num_denom_pitch,			//IN: pitch of numerator and denominator aggregation buffer
 	const uint2 image_dim,			//IN: image dimensions
-	uchar* image_o)				//OUT: image estimate
-{
+	uchar* image_o,				//OUT: image estimate
+	const size_t image_pitch	//IN: pitch of image estimate
+) {
 	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 	uint idy = blockIdx.y * blockDim.y + threadIdx.y;
 	if (idx >= image_dim.x || idy >= image_dim.y) return;
 
-	int value = lrintf(numerator[ idx2(idx,idy,image_dim.x) ] / denominator[ idx2(idx,idy,image_dim.x) ] );
+	const uint index = idy * num_denom_pitch + idx;
+	int value = lrintf(numerator[index] / denominator[index]);
 	if (value < 0) value = 0;
 	if (value > 255) value = 255;
-	image_o[ idx2(idx,idy,image_dim.x) ] = (uchar)value;
+	image_o[idy * image_pitch + idx] = (uchar)value;
 }
 
 
@@ -384,6 +389,7 @@ void wiener_filtering(
 extern "C" void run_get_block(
 	const uint2 start_point,
 	const uchar* __restrict image,
+	const size_t pitch,
 	const ushort* __restrict stacks,
 	const uint* __restrict num_patches_in_stack,
 	float* patch_stack,
@@ -396,6 +402,7 @@ extern "C" void run_get_block(
 	get_block<<<num_blocks,num_threads>>>(
 		start_point,
 		image,
+		pitch,
 		stacks,
 		num_patches_in_stack,
 		patch_stack,
@@ -436,6 +443,7 @@ extern "C" void run_aggregate_block(
 	const float* __restrict kaiser_window,
 	float* numerator,
 	float* denominator,
+	const size_t num_denom_pitch,
 	const uint* __restrict num_patches_in_stack,
 	const uint2 image_dim,
 	const uint2 stacks_dim,
@@ -451,6 +459,7 @@ extern "C" void run_aggregate_block(
 		kaiser_window,
 		numerator,
 		denominator,
+		num_denom_pitch,
 		num_patches_in_stack,
 		image_dim,
 		stacks_dim,
@@ -461,8 +470,10 @@ extern "C" void run_aggregate_block(
 extern "C" void run_aggregate_final(
 	const float* __restrict numerator,
 	const float* __restrict denominator,
+	const size_t num_denom_pitch,
 	const uint2 image_dim,
 	uchar* denoised_image,
+	const size_t image_pitch,
 	const dim3 num_threads,
 	const dim3 num_blocks
 )
@@ -470,8 +481,10 @@ extern "C" void run_aggregate_final(
 	aggregate_final<<<num_blocks,num_threads>>>(
 		numerator,
 		denominator,
+		num_denom_pitch,
 		image_dim,
-		denoised_image
+		denoised_image,
+		image_pitch
 	);	
 }
 

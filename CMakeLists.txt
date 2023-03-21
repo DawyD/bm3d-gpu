@@ -9,17 +9,33 @@ include_directories(
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-# The following lines build the main executable.
-add_executable(bm3d
-	include/CImg.h
-	include/stopwatch.hpp
-	include/indices.cuh
-	include/params.hpp
-	include/bm3d.hpp
-	src/filtering.cu
-	src/blockmatching.cu
-	src/dct8x8.cu
-	src/main_nodisplay.cpp
-)
+option(BUILD_EXE "Build executable" ON)
+
+if(BUILD_EXE)
+	# The following lines build the main executable.
+	add_executable(bm3d
+		include/CImg.h
+		include/stopwatch.hpp
+		include/indices.cuh
+		include/params.hpp
+		include/bm3d.hpp
+		src/filtering.cu
+		src/blockmatching.cu
+		src/dct8x8.cu
+		src/main_nodisplay.cpp
+	)
+else()
+	add_library(bm3d
+		include/CImg.h
+		include/stopwatch.hpp
+		include/indices.cuh
+		include/params.hpp
+		include/bm3d.hpp
+		src/filtering.cu
+		src/blockmatching.cu
+		src/dct8x8.cu
+	)
+endif(BUILD_EXE)
+unset(BUILD_EXE CACHE)
 
 target_link_libraries(bm3d cufft cudart png)

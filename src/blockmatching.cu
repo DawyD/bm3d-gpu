@@ -74,6 +74,7 @@ Each thread process one reference patch. All the warps of a block process the sa
 __global__
 void block_matching(
 	const  uchar* __restrict image, //IN: Original image
+	const size_t pitch,				//IN: Pitch of original image
 	ushort* g_stacks, 				//OUT: For each reference patch contains addresses of similar patches (patch is adressed by top left corner) [..LOC_Y(sbyte)..|..LOC_X(sbyte)..]
 	uint* g_num_patches_in_stack,	//OUT: For each reference patch contains number of similar patches
 	const uint2 image_dim,			//IN: Image dimensions
@@ -127,7 +128,7 @@ void block_matching(
 		int sx = i % p_rectangle_width;
 		int sy = i / p_rectangle_width;
 		if (p_rectangle_start+sx >= image_dim.x) continue;
-		s_image_p[i] = image[idx2(p_rectangle_start+sx,p.y+sy,image_dim.x)];
+		s_image_p[i] = image[(p.y + sy) * pitch + p_rectangle_start + sx];
 	}
 	
 	__syncthreads();
@@ -166,7 +167,7 @@ void block_matching(
 				uint dist = 0;
 				for(uint iy = 0; iy < params.k; ++iy)
 				{
-					dist += L2p2((int)s_image_p[ idx2(i, iy, p_rectangle_width) ], (int)image[ idx2(q_rectangle_start+i, q.y+iy, image_dim.x) ]);
+					dist += L2p2((int)s_image_p[idx2(i, iy, p_rectangle_width)], (int)image[(q.y + iy) * pitch + q_rectangle_start + i]);
 				}
 				s_diff[i] = dist;
 			}
@@ -246,7 +247,8 @@ void block_matching(
 
 
 extern "C" void run_block_matching(
-	const  uchar* __restrict image, //Original image
+	const uchar* __restrict image,  //Original image
+	const size_t pitch,		        //Pitch of original image
 	ushort* stacks, 				//For each reference patch contains addresses of similar patches (patch is adressed by top left corner)
 	uint* num_patches_in_stack,		//For each reference patch contains number of similar patches
 	const uint2 image_dim,			//Image dimensions
@@ -260,6 +262,7 @@ extern "C" void run_block_matching(
 {
 	block_matching<<<num_blocks, num_threads,shared_memory_size>>>(
 		image,
+		pitch,
 		stacks,
 		num_patches_in_stack,
 		image_dim,

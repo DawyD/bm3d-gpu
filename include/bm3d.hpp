@@ -32,6 +32,7 @@
 
 extern "C" void run_block_matching(
 	const  uchar* __restrict image,
+	const size_t pitch,
 	ushort* stacks,
 	uint* num_patches_in_stack,
 	const uint2 image_dim,
@@ -46,6 +47,7 @@ extern "C" void run_block_matching(
 extern "C" void run_get_block(
 	const uint2 start_point,
 	const uchar* __restrict image,
+	const size_t pitch,
 	const ushort* __restrict stacks,
 	const uint* __restrict num_patches_in_stack,
 	float* patch_stack,
@@ -93,6 +95,7 @@ extern "C" void run_aggregate_block(
 	const float* __restrict kaiser_window,
 	float* numerator,
 	float* denominator,
+	const size_t num_denom_pitch,
 	const uint* __restrict num_patches_in_stack,
 	const uint2 image_dim,
 	const uint2 stacks_dim,
@@ -104,8 +107,10 @@ extern "C" void run_aggregate_block(
 extern "C" void run_aggregate_final(
 	const float* __restrict numerator,
 	const float* __restrict denominator,
+	const size_t num_denom_pitch,
 	const uint2 image_dim,
 	uchar* denoised_noisy_image,
+	const size_t image_pitch,
 	const dim3 num_threads,
 	const dim3 num_blocks
 );
@@ -163,6 +168,8 @@ private:
 	int h_reserved_channels;
 	bool h_reserved_two_step;
 	uint2 h_batch_size; 				//h_batch_size.x has to be divisible by properties.warpSize
+	size_t d_pitch_uchar; 				//bytes / sizeof(uchar)
+	size_t d_pitch_float; 				//bytes / sizeof(float)
 
 	//Denoising parameters
 	Params h_hard_params;
@@ -201,23 +208,42 @@ private:
 		d_numerator.resize(channels);
 		d_denominator.resize(channels);
 
-		int size = width * height;
+		size_t byte_width = width * sizeof(uchar);
 		for(auto & it : d_noisy_image) {
-			cuda_error_check( cudaMalloc((void**)&it, sizeof(uchar) * size) );
+			cuda_error_check(cudaMallocPitch((void**)&it, &d_pitch_uchar, byte_width, height));
 		}
 
 		for(auto & it : d_denoised_image) {
-			cuda_error_check( cudaMalloc((void**)&it, sizeof(uchar) * size) );
+			cuda_error_check(cudaMallocPitch((void**)&it, &d_pitch_uchar, byte_width, height));
 		}
+		d_pitch_uchar /= sizeof(uchar);
 
+		byte_width = width * sizeof(float);
 		for(auto & it : d_numerator) {
-			cuda_error_check( cudaMalloc((void**)&it, sizeof(float) * size) );
+			cuda_error_check(cudaMallocPitch((void**)&it, &d_pitch_float, byte_width, height));
 		}
 
 		for(auto & it : d_denominator) {
-			cuda_error_check( cudaMalloc((void**)&it, sizeof(float) * size) );
+			cuda_error_check(cudaMallocPitch((void**)&it, &d_pitch_float, byte_width, height));
+		}
+		d_pitch_float /= sizeof(float);
+	}
+
+	//Allocate device buffers dependent on image dimensions
+	void allocate_device_image_partial(uint width, uint height, uint channels)
+	{
+		d_numerator.resize(channels);
+		d_denominator.resize(channels);
+
+		const size_t byte_width = width * sizeof(float);
+		for(auto & it : d_numerator) {
+			cuda_error_check(cudaMallocPitch((void**)&it, &d_pitch_float, byte_width, height));
 		}
 
+		for(auto & it : d_denominator) {
+			cuda_error_check(cudaMallocPitch((void**)&it, &d_pitch_float, byte_width, height));
+		}
+		d_pitch_float /= sizeof(float);
 	}
 
 	//Creates an kaiser window (only for k = 8, alpha = 2.0) and copies it to the device.
@@ -251,11 +277,10 @@ private:
 	//Copy image to device
 	void copy_device_image(const uchar * src_image, int width, int height, int channels)
 	{
-		size_t image_size = width * height;
-		for(int i = 0; i < channels; ++i) {
-			//Copy image to device
-			cuda_error_check( cudaMemcpy(d_noisy_image[i],src_image+i*image_size,image_size*sizeof(uchar),cudaMemcpyHostToDevice));
-		}
+		const size_t image_size = width * height;
+		const size_t h_pitch = width * sizeof(uchar);
+		for (unsigned char i = 0; i < channels; i++)
+			cuda_error_check(cudaMemcpy2D(d_noisy_image[i], d_pitch_uchar, src_image + i * image_size, h_pitch, h_pitch, height, cudaMemcpyHostToDevice));
 	}
 	
 	//Compute launch parameters for block-matching kernel
@@ -294,8 +319,15 @@ private:
 	/*
 	Launch first step of BM3D. It produces basic estimate in denoised_image arrays.
 	*/
-	void first_step(std::vector<uchar*> & denoised_image, int width, int height, int channels, uint* sigma)
-	{	
+	void first_step(
+		const std::vector<uchar*> & d_noisy_image,
+		const std::vector<uchar*> & denoised_image,
+		const size_t pitch,
+		const int width,
+		const int height,
+		const int channels,
+		const uint* sigma
+	) {
 		//image dimensions
 		const uint2 image_dim = make_uint2(width,height);
 
@@ -356,6 +388,7 @@ private:
 				//Finds similar patches for each reference patch of a batch and stores them in d_stacks array
 				run_block_matching(
 					d_noisy_image[0],			// IN: Image	
+					pitch,						// IN: Pitch of image
 					d_stacks,					// OUT: Array of adresses of similar patches
 					d_num_patches_in_stack,		// OUT: Array containing numbers of these addresses
 					image_dim,					// IN: Image dimensions
@@ -382,6 +415,7 @@ private:
 					run_get_block(
 						start_point,				//IN: First reference patch of a batch
 						d_noisy_image[channel],		//IN: Image
+						pitch,						//IN: Pitch of image
 						d_stacks,					//IN: Array of adresses of similar patches
 						d_num_patches_in_stack,		//IN: Numbers of patches in 3D groups
 						d_gathered_stacks,			//OUT: Assembled 3D groups
@@ -464,6 +498,7 @@ private:
 						d_kaiser_window,			//IN: Kaiser window
 						d_numerator[channel],		//IN/OUT: Numerator aggregation buffer
 						d_denominator[channel],		//IN/OUT: Denominator aggregation buffer
+						d_pitch_float,				//IN: Pitch of numerator and denominator aggregation buffer
 						d_num_patches_in_stack,		//IN: Numbers of patches in 3D groups
 						image_dim,					//IN: Image dimensions
 						stacks_dim,					//IN: Dimensions limiting addresses of reference patches
@@ -487,8 +522,10 @@ private:
 			run_aggregate_final(
 				d_numerator[channel],			//IN: Numerator aggregation buffer
 				d_denominator[channel],			//IN: Denominator aggregation buffer
+				d_pitch_float,					//IN: Pitch of numerator and denominator aggregation buffer
 				image_dim,						//IN: Image dimensions
 				denoised_image[channel],		//OUT: Image estimate
+				pitch,							//IN: Pitch of image estimate
 				num_threads_f,					//CUDA: Threads in block
 				num_blocks_f 					//CUDA: Blocks in grid
 			);
@@ -510,8 +547,20 @@ private:
 
 	}
 
-	void second_step(std::vector<uchar*> & denoised_image, int width, int height, int channels, uint* sigma)
-	{	
+	void first_step(std::vector<uchar*> & denoised_image, int width, int height, int channels, uint* sigma)
+	{
+		first_step(d_noisy_image, denoised_image, d_pitch_uchar, width, height, channels, sigma);
+	}
+
+	void second_step(
+		const std::vector<uchar*> & d_noisy_image,
+		const std::vector<uchar*> & denoised_image,
+		const size_t pitch,
+		const int width,
+		const int height,
+		const int channels,
+		const uint* sigma
+	) {
 		//Image dimensions
 		const uint2 image_dim = make_uint2(width,height);
 
@@ -573,7 +622,8 @@ private:
 					time_blockmatching.start();
 
 				run_block_matching(
-					d_denoised_image[0],	// IN: Image	
+					denoised_image[0],		// IN: Image
+					pitch,					// IN: Pitch of image
 					d_stacks,				// OUT: Array of adresses of similar patches
 					d_num_patches_in_stack,	// OUT: Number of blocks on each adress
 					image_dim,				// IN: Image dimensions
@@ -599,7 +649,8 @@ private:
 					//Get patches from basic image estimate to 3D auxiliary array according to the addresess form block-matching
 					run_get_block(
 						start_point,				//IN: First reference patch of a batch
-						d_denoised_image[channel], 	//IN: Basic image estimate (produced by 1st step)
+						denoised_image[channel], 	//IN: Basic image estimate (produced by 1st step)
+						pitch,						//IN: Pitch of basic image estimate
 						d_stacks,					//IN: Array of adresses of similar patches
 						d_num_patches_in_stack,		//IN: Numbers of patches in 3D groups
 						d_gathered_stacks_basic,	//OUT: Assembled 3D groups
@@ -617,6 +668,7 @@ private:
 					run_get_block(
 						start_point,				//IN: First reference patch of a batch
 						d_noisy_image[channel],		//IN: Basic image estimate (produced by 1st step)
+						pitch,						//IN: Pitch of basic image estimate
 						d_stacks,					//IN: Array of adresses of similar patches
 						d_num_patches_in_stack,		//IN: Numbers of patches in 3D groups
 						d_gathered_stacks,			//OUT: Assembled 3D groups
@@ -708,6 +760,7 @@ private:
 						d_kaiser_window,		//IN: Kaiser window
 						d_numerator[channel],	//IN/OUT: Numerator aggregation buffer
 						d_denominator[channel],	//IN/OUT: Denominator aggregation buffer
+						d_pitch_float,			//IN: Pitch of numerator and aggregation buffer
 						d_num_patches_in_stack,	//IN: Numbers of patches in 3D groups
 						image_dim,				//IN: Image dimensions
 						stacks_dim,				//IN: Dimensions limiting addresses of reference patches
@@ -730,8 +783,10 @@ private:
 			run_aggregate_final(
 				d_numerator[channel],			//IN: Aggregation buffer
 				d_denominator[channel],			//IN: Aggregation buffer
+				d_pitch_float,					//IN: Pitch of aggregation buffers
 				image_dim,						//IN: Image dimensions
 				denoised_image[channel],		//OUT: Image estimate
+				pitch,							//IN: Pitch of image estimate
 				num_threads_f,
 				num_blocks_f 
 			);
@@ -752,18 +807,18 @@ private:
 		}
 	}
 
+	void second_step(std::vector<uchar*> & denoised_image, int width, int height, int channels, uint* sigma)
+	{
+		second_step(d_noisy_image, denoised_image, d_pitch_uchar, width, height, channels, sigma);
+	}
+
 	//Copy image from device to host
 	void copy_host_image(uchar * dst_image, int width, int height, int channels)
 	{
-		size_t image_size = width * height;
-		for (int channel = 0; channel < channels; ++channel)
-		{
-			cuda_error_check( cudaMemcpy(
-						dst_image+channel*image_size,		// Destination
-						d_denoised_image[channel],			// Source
-						image_size*sizeof(uchar),			// Size
-						cudaMemcpyDeviceToHost) );			// Copy direction
-		}
+		const size_t image_size = width * height;
+		const size_t h_pitch = width * sizeof(uchar);
+		for (unsigned char i = 0; i < channels; i++)
+			cuda_error_check(cudaMemcpy2D(dst_image + i * image_size, h_pitch, d_denoised_image[i], d_pitch_uchar, h_pitch, height, cudaMemcpyDeviceToHost));
 	}
 
 	//Free all buffers allocated on device that are dependent on 'denoising parameters'.
@@ -893,14 +948,55 @@ public:
 		//Copy back
 		copy_host_image(dst_image, width, height, channels);
 
-		//if(_verbose)
-		std::cout << "Total time: " << total.getSeconds() << std::endl;
+		if(_verbose)
+			std::cout << "Total time: " << total.getSeconds() << std::endl;
 	}
 
-	/*void denoise_device_image(uchar *src_image, uchar *dst_image, int width, int height, int channels, bool two_step)
-	{
-		//TODO
-	}*/
+	void denoise_device_image(
+		const std::vector<uchar*> & d_noisy_image,
+		const std::vector<uchar*> & d_denoised_image,
+		const size_t pitch,
+		const int width,
+		const int height,
+		const int channels,
+		const uint* sigma,
+		const bool two_step
+	) {
+		Stopwatch total;
+		total.start();
+
+		//Allocation
+		if (h_reserved_width != width || h_reserved_height != height || h_reserved_channels != channels || h_reserved_two_step != two_step)
+			reserve_partial(width, height, channels, two_step);
+
+		if (h_reserved_width == 0 || h_reserved_height == 0 || h_reserved_channels == 0 )
+			return;
+
+		Stopwatch p1;
+		p1.start();
+
+		//1st denoising step
+		null_aggregation_buffers(width,height);
+		first_step(d_noisy_image, d_denoised_image, pitch, width, height, channels, sigma);
+
+		p1.stop();
+		if (_verbose)
+			std::cout << "1st step took: " << p1.getSeconds() << std::endl;
+
+		//2nd denoising step
+		if (two_step)
+		{
+			Stopwatch p2;
+			p2.start();
+			null_aggregation_buffers(width,height);
+			second_step(d_noisy_image, d_denoised_image, pitch, width, height, channels, sigma);
+			if (_verbose)
+				std::cout << "2nd step took: " << p2.getSeconds() << std::endl;
+		}
+
+		if(_verbose)
+			std::cout << "Total time: " << total.getSeconds() << std::endl;
+	}
 
 	void set_hard_params(uint n, uint k, uint N, uint T, uint p, float L3D)
 	{
@@ -948,6 +1044,21 @@ public:
 		allocate_device_image(width,height,channels);
 		allocate_device_auxiliary_arrays(); //TODO: not necessary
 	}
+
+	void reserve_partial(int width, int height, int channels, bool two_step)
+	{
+		h_reserved_width = width;
+		h_reserved_height = height;
+		h_reserved_channels = channels;
+		h_reserved_two_step = two_step;
+
+		free_device_image();
+		free_device_auxiliary_arrays(); //TODO: not necessary
+
+		allocate_device_image_partial(width, height, channels);
+		allocate_device_auxiliary_arrays(); //TODO: not necessary
+	}
+
 	void clear()
 	{
 		h_reserved_width = 0;
